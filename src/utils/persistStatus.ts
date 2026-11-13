@@ -34,6 +34,12 @@ interface IPersistStatus {
     "app.pluginUpdateTime": number;
     /** 内置音源订阅是否已初始化（避免每次启动重复安装） */
     "app.builtinSubscribeDone": boolean;
+    /**
+     * 上次运行的构建号（CFBundleVersion）。
+     * 用于检测「覆盖升级」：构建号变化时清理旧的初始化标记，
+     * 否则 TrollStore 覆盖安装会保留旧数据，导致新逻辑永远不生效。
+     */
+    "app.lastBuildVersion": string;
     /** 缓存的定时关闭自定义时间（分钟） */
     "app.scheduleCloseTime": number;
     /** 歌词-是否启用翻译 */
