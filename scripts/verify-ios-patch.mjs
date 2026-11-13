@@ -186,14 +186,20 @@ check("fileUtils 绕开 iOS 不存在的 PicturesDirectoryPath", () => {
 // ---------------------------------------------------------------- 6. pbxproj
 check("Xcode 工程 Bundle ID / 版本 / 部署目标", () => {
     const t = read("ios/MusicFree.xcodeproj/project.pbxproj");
-    has(t, "app.musicfree.trollstore", "Bundle ID 未替换");
+    // bundleId 已从 app.musicfree.trollstore 换为 app.musicfree.ios
+    // （换 id 是为了让 SpringBoard 重建图标缓存，见 TROLLSTORE.md）
+    // 这里只校验「已从 RN 模板替换成自己的」，不锁死具体值
+    assert(
+        t.indexOf("app.musicfree.ios") !== -1,
+        "Bundle ID 未替换成 app.musicfree.ios",
+    );
     assert(
         !t.includes("org.reactjs.native.example"),
         "仍残留 RN 模板 Bundle ID",
     );
     assert(/MARKETING_VERSION = [0-9]+[.][0-9]+[.][0-9]+/.test(t), "MARKETING_VERSION ok");
     has(t, "IPHONEOS_DEPLOYMENT_TARGET = 15.1", "部署目标变化，请复核 TrollStore 支持范围");
-    return "app.musicfree.trollstore / iOS 15.1+";
+    return "app.musicfree.ios / iOS 15.1+";
 });
 
 // ---------------------------------------------------------------- 7. 构建资产
