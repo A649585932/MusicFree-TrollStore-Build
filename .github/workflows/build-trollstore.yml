@@ -27,7 +27,9 @@ on:
 jobs:
   build-tipa:
     # macOS runner 才能跑 xcodebuild / CocoaPods / codesign
-    runs-on: macos-14
+    # 注意：实测该账号上 macos-14 已不再派活（job 秒 cancelled / 0 step），
+    # macos-15 与 macos-latest 正常。固定 macos-15 避免镜像漂移。
+    runs-on: macos-15
     timeout-minutes: 90
 
     steps:
