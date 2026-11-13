@@ -1,18 +1,20 @@
-"""Generate a full AppIcon.appiconset from a single source image.
+"""Generate a full-bleed AppIcon.appiconset from a single source image.
 
-The upstream repo ships an empty AppIcon.appiconset (9 slots, no filenames),
-so Xcode produced no Assets.car and iOS showed a blank icon.
+Why this exists
+---------------
+The upstream repo ships an EMPTY AppIcon.appiconset (9 slots, no filenames),
+so Xcode emitted no usable icon and iOS showed a blank tile.
 
-Design rules for iOS app icons:
-  * must be fully opaque (alpha is ignored/blackened by iOS)
-  * must be a full-bleed square; the system applies the rounded mask itself
-  * do NOT bake in rounded corners or leave padding, otherwise you get the
-    "white border" look after SpringBoard masks it
-
-The source logo.png is 192x192 with ~30% transparent margin, so pasting it on
-a white canvas produced a white frame. Instead we fill the canvas with the
-brand background colour sampled from the logo itself and scale the mark to
-~86% so it reads well inside the rounded mask.
+Icon rules that matter here
+---------------------------
+* iOS app icons must be fully OPAQUE. Any alpha is ignored and can render as a
+  black plate, so every output is converted to RGB.
+* The system applies the rounded-corner mask itself. Do NOT bake in rounded
+  corners or a visible frame: after masking, any inner margin reads as a
+  "white/odd border" around the artwork.
+* Therefore the artwork is scaled to FULL BLEED (100% of the canvas), not
+  inset. The mark is allowed to be cropped slightly at the extreme edges,
+  which is what real app icons do.
 
 Usage: python scripts/gen_ios_icons.py
 """
@@ -26,7 +28,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src", "assets", "imgs", "logo.png")
 OUT_DIR = os.path.join(ROOT, "ios", "MusicFree", "Images.xcassets", "AppIcon.appiconset")
 
-# (idiom, size, scale)
 MATRIX = [
     ("iphone", 20, 2), ("iphone", 20, 3),
     ("iphone", 29, 2), ("iphone", 29, 3),
@@ -40,13 +41,14 @@ MATRIX = [
     ("ios-marketing", 1024, 1),
 ]
 
-# Fallback background if the logo has no usable opaque colour.
 FALLBACK_BG = (39, 40, 44)
-MARK_RATIO = 0.94  # how much of the canvas the artwork occupies
+
+# 1.0 = artwork touches every edge (true full bleed, like stock iOS icons).
+# Slight overscan hides antialiasing seams after the rounded mask is applied.
+BLEED = 1.00
 
 
 def dominant_color(img: Image.Image):
-    """Most common opaque colour, used as the icon background."""
     rgb = img.convert("RGBA")
     small = rgb.resize((64, 64), Image.NEAREST)
     counts = {}
@@ -60,19 +62,16 @@ def dominant_color(img: Image.Image):
 
 
 def build_master(src: Image.Image) -> Image.Image:
-    """Square, fully opaque master image at 1024x1024."""
+    """Opaque 1024x1024 master whose artwork bleeds to all four edges."""
     rgba = src.convert("RGBA")
     bg = dominant_color(rgba)
 
-    # The source logo is a white cat mark sitting on a dark rounded square,
-    # surrounded by a transparent margin. If we crop to alpha bbox we keep the
-    # dark plate, and the cat ends up tiny in the middle of the icon.
-    # Instead: isolate the bright artwork (the cat) and re-composite it onto a
-    # full-bleed background, so the mark fills the icon properly.
     bbox = rgba.getbbox()
     if bbox:
         rgba = rgba.crop(bbox)
 
+    # The logo is a bright cat mark on a dark plate. Keep only the bright mark,
+    # so the icon is "white cat on solid brand background" at full bleed.
     w, h = rgba.size
     px = rgba.load()
     bright = []
@@ -89,28 +88,23 @@ def build_master(src: Image.Image) -> Image.Image:
         x1 = max(p[0] for p in bright)
         y0 = min(p[1] for p in bright)
         y1 = max(p[1] for p in bright)
-        # Small padding so the mark does not touch the rounded mask edge.
-        pad = max(2, int(0.02 * max(x1 - x0, y1 - y0)))
-        box = (max(0, x0 - pad), max(0, y0 - pad),
-               min(w, x1 + pad + 1), min(h, y1 + pad + 1))
-        art = rgba.crop(box)
+        art = rgba.crop((x0, y0, x1 + 1, y1 + 1))
     else:
         art = rgba
 
-    inner = int(1024 * MARK_RATIO)
-    # NOTE: Image.thumbnail() only ever SHRINKS an image; our cropped mark is
-    # ~110px, so thumbnail() would leave it tiny in the middle of the icon.
-    # Compute an explicit scale so the mark actually fills the canvas.
-    scale = inner / float(max(art.width, art.height))
-    new_size = (max(1, int(round(art.width * scale))),
-                max(1, int(round(art.height * scale))))
-    art = art.resize(new_size, Image.LANCZOS)
+    # Full bleed: scale the mark so it covers the whole canvas.
+    target = int(1024 * BLEED)
+    scale = target / float(max(art.width, art.height))
+    art = art.resize(
+        (max(1, int(round(art.width * scale))), max(1, int(round(art.height * scale)))),
+        Image.LANCZOS,
+    )
 
-    # Alpha-blend the mark onto the solid background => stays fully opaque
     layer = Image.new("RGB", art.size, bg)
     layer.paste(art, (0, 0), art)
 
-    off = ((1024 - art.width) // 2, (1024 - art.height) // 2)
+    # Center; with BLEED > 1 the overflow is cropped by the canvas bounds.
+    off = ((1024 - layer.width) // 2, (1024 - layer.height) // 2)
     canvas.paste(layer, off)
     return canvas
 
@@ -123,15 +117,15 @@ def main() -> int:
 
     src = Image.open(SRC)
     master = build_master(src)
-    print(f"master 1024x1024 opaque, bg={dominant_color(src.convert('RGBA'))}")
+    print(f"master 1024x1024 opaque full-bleed, bg={dominant_color(src.convert('RGBA'))}")
 
     images = []
     for idiom, size, scale in MATRIX:
         px = int(round(size * scale))
         name = f"icon-{idiom}-{size}x{size}@{scale}x.png"
-        out = master.resize((px, px), Image.LANCZOS)
-        # Guarantee RGB (no alpha) so iOS never renders a black plate.
-        out.convert("RGB").save(os.path.join(OUT_DIR, name), "PNG")
+        master.resize((px, px), Image.LANCZOS).convert("RGB").save(
+            os.path.join(OUT_DIR, name), "PNG"
+        )
         images.append({
             "filename": name,
             "idiom": idiom,
