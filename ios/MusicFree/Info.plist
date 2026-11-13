@@ -22,6 +22,16 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!--
+	  iOS 的「App 切换器（多任务界面）」和「设置 -> 通用 -> iPhone 储存空间」
+	  读取的是顶层 CFBundleIconName，而不是 CFBundleIcons 里的嵌套值。
+	  缺失时桌面上有图标、但多任务卡片会是空白占位。
+	  同时补 CFBundleIconFile 作为老系统（iOS 13 以下兜底）的兼容键。
+	-->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon60x60</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
