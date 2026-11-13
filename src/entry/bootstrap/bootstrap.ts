@@ -11,6 +11,12 @@ import lyricManager from "@/core/lyricManager";
 import musicHistory from "@/core/musicHistory";
 import MusicSheet from "@/core/musicSheet";
 import PluginManager from "@/core/pluginManager";
+import {
+    BUILTIN_SUBSCRIBE_FLAG,
+    BUILTIN_SUBSCRIBE_URLS,
+    normalizeSubscribeManifest,
+} from "@/core/pluginManager/builtinSubscribe";
+import axios from "axios";
 import Theme from "@/core/theme";
 import TrackPlayer from "@/core/trackPlayer";
 import NativeUtils from "@/native/utils";
@@ -107,6 +113,12 @@ async function bootstrapImpl() {
     logger.mark("插件初始化完成");
     trace("插件初始化完成");
 
+    // 内置音源：首次启动自动安装，装完打标记不再打扰
+    await installBuiltinPluginsIfNeeded().catch(e => {
+        errorLog("内置音源初始化失败", e);
+    });
+    logger.mark("内置音源检查完成");
+
     await initTrackPlayer(logger).catch(err => {
         // 初始化播放器出错，延迟初始化
         const bootstrapState = getDefaultStore().get(bootstrapAtom);
@@ -152,6 +164,76 @@ async function setupFolder() {
         }),
     ]);
 }
+
+/**
+ * 内置音源：首次启动自动装好，让用户装上就能搜歌。
+ *
+ * 行为约定：
+ *   - 只在「从未初始化过」且「当前没有用户插件」时执行，避免打扰已有用户；
+ *   - 装完写入 BUILTIN_SUBSCRIBE_FLAG，之后不再自动跑；
+ *   - 用户手动删掉的插件不会被强行装回来（因为有 flag）；
+ *   - 全程静默，失败只记日志，不阻断启动。
+ */
+async function installBuiltinPluginsIfNeeded() {
+    if (!BUILTIN_SUBSCRIBE_URLS.length) {
+        return;
+    }
+    if (PersistStatus.get(BUILTIN_SUBSCRIBE_FLAG)) {
+        return;
+    }
+    // 已经有插件（用户自己装过）就不插手
+    if (PluginManager.getSortedPlugins().length > 0) {
+        PersistStatus.set(BUILTIN_SUBSCRIBE_FLAG, true);
+        return;
+    }
+
+    const installed: string[] = [];
+
+    for (const manifestUrl of BUILTIN_SUBSCRIBE_URLS) {
+        try {
+            const resp = await axios.get(manifestUrl, {
+                timeout: 15000,
+                headers: {
+                    "Cache-Control": "no-cache",
+                    Pragma: "no-cache",
+                },
+            });
+            const entries = normalizeSubscribeManifest(resp.data);
+
+            // 清单里没有可解析条目，说明这个 URL 本身可能就是插件
+            const targets = entries.length
+                ? entries
+                : [{ name: "内置插件", url: manifestUrl }];
+
+            for (const entry of targets) {
+                try {
+                    const result = await PluginManager.installPluginFromUrl(
+                        entry.url,
+                        { notCheckVersion: true },
+                    );
+                    if (result?.success) {
+                        installed.push(result.pluginName ?? entry.name);
+                    }
+                } catch (e) {
+                    errorLog("内置插件安装失败", { url: entry.url, e });
+                }
+            }
+        } catch (e) {
+            errorLog("内置订阅清单拉取失败", { url: manifestUrl, e });
+        }
+    }
+
+    PersistStatus.set(BUILTIN_SUBSCRIBE_FLAG, true);
+
+    if (installed.length) {
+        trace(`内置音源已安装 ${installed.length} 个：${installed.join("、")}`);
+        // 启动阶段 Toast 可能还没挂载好，延迟到下一帧
+        setTimeout(() => {
+            Toast.success(`已内置 ${installed.length} 个音源`);
+        }, 1500);
+    }
+}
+
 
 export async function initTrackPlayer(logger?: IPerfLogger) {
     try {
