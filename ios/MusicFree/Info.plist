@@ -73,8 +73,14 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
+	<!--
+	  启动图不用 storyboard：上游 LaunchScreen.storyboard 是个老模板，
+	  用 Xcode 16.4 / iOS 18.5 SDK 编译出的 nib 在 iOS 16.1.1 上
+	  UIStoryboard initWithBundle: 会抛 ObjC 异常 -> SIGABRT -> 启动秒退。
+	  改用 iOS 14+ 原生 UILaunchScreen 字典（纯色启动），完全绕开 nib 解析。
+	-->
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
