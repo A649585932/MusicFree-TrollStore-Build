@@ -229,20 +229,59 @@ async function extraMakeup() {
         }
     } catch { }
 
+    /**
+     * 处理外部唤起的 URL。
+     *
+     * 支持的入口（可在 Safari / 桌面快捷指令 / 其他 App 里直接点）：
+     *   musicfree://install/<url1>,<url2>,...   批量安装插件（首次启动也会处理）
+     *   <path>.js                                本地/网络插件文件
+     *   <path>.mp3|flac|...                      本地音频直接播放
+     */
     async function handleLinkingUrl(url: string) {
-        // 插件
         try {
-            if (url.startsWith("musicfree://install/")) {
-                const plugins = url
-                    .slice(20)
-                    .split(",")
-                    .map(decodeURIComponent);
-                await Promise.all(
-                    plugins.map(it =>
-                        PluginManager.installPluginFromUrl(it).catch(emptyFunction),
-                    ),
+            const INSTALL_PREFIX = "musicfree://install/";
+            if (url.startsWith(INSTALL_PREFIX)) {
+                const raw = decodeURIComponent(url.slice(INSTALL_PREFIX.length));
+                const urls = raw
+                    .split(/[,;\n]+/)
+                    .map(it => it.trim())
+                    .filter(Boolean);
+
+                if (!urls.length) {
+                    Toast.warn("没有解析到插件地址");
+                    return;
+                }
+
+                Toast.warn(`正在安装 ${urls.length} 个插件…`);
+
+                const results = await Promise.all(
+                    urls.map(async it => {
+                        try {
+                            const res = await PluginManager.installPluginFromUrl(it);
+                            return { url: it, ok: true, name: (res as any)?.pluginName };
+                        } catch (e: any) {
+                            return { url: it, ok: false, message: e?.message ?? "未知错误" };
+                        }
+                    }),
                 );
-                Toast.success("安装成功~");
+
+                const okList = results.filter(r => r.ok);
+                const failList = results.filter(r => !r.ok);
+
+                if (okList.length) {
+                    const names = okList
+                        .map(r => r.name)
+                        .filter(Boolean)
+                        .join("、");
+                    Toast.success(
+                        `已安装 ${okList.length} 个插件${names ? `：${names}` : ""}`,
+                    );
+                }
+                if (failList.length) {
+                    Toast.warn(
+                        `${failList.length} 个插件安装失败${failList[0]?.message ? `：${failList[0].message}` : ""}`,
+                    );
+                }
             } else if (url.endsWith(".js")) {
                 PluginManager.installPluginFromLocalFile(url, {
                     notCheckVersion: Config.getConfig(
