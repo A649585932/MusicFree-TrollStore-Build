@@ -1,0 +1,126 @@
+name: Build MusicFree TrollStore TIPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_arch:
+        description: '启用 New Architecture (0/1)'
+        required: false
+        default: '0'
+        type: choice
+        options: ['0', '1']
+      sign_tool:
+        description: '伪签名方式（默认 none，交给 TrollStore 安装时签名）'
+        required: false
+        default: 'none'
+        type: choice
+        options: ['none', 'auto', 'ldid', 'codesign']
+  push:
+    branches: [master, main]
+    paths:
+      - 'scripts/build-trollstore.sh'
+      - 'scripts/trollstore*.plist'
+      - 'src/native/**'
+      - 'ios/**'
+      - '.github/workflows/build-trollstore.yml'
+
+jobs:
+  build-tipa:
+    # macOS runner 才能跑 xcodebuild / CocoaPods / codesign
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Ruby / CocoaPods
+        run: |
+          ruby --version
+          gem install cocoapods -v '~> 1.15' --no-document || true
+          pod --version || sudo gem install cocoapods --no-document
+          pod --version
+
+      # ldid 不是必须（脚本会回退 codesign），装上更接近越狱社区标准产物
+      - name: Install ldid (optional)
+        run: |
+          brew install ldid 2>/dev/null || echo "ldid 不可用，脚本将回退 codesign ad-hoc"
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock', 'package-lock.json') }}
+          restore-keys: ${{ runner.os }}-pods-
+
+      - name: Static self-check (iOS shims / plist / project)
+        run: |
+          # 上游 .gitignore 含 scripts/，确认四个新增脚本确实被 checkout 进来
+          for f in \
+            scripts/verify-ios-patch.mjs \
+            scripts/build-trollstore.sh \
+            scripts/trollstore.entitlements.plist \
+            scripts/trollstore-full-access.entitlements.plist; do
+            test -f "$f" || { echo "::error::缺失 $f —— 检查 .gitignore 白名单是否随 fork 带过来"; exit 1; }
+          done
+          node scripts/verify-ios-patch.mjs
+
+      - name: Build unsigned archive → Payload → .tipa
+        env:
+          NEW_ARCH: ${{ inputs.new_arch || '0' }}
+          SIGN_TOOL: ${{ inputs.sign_tool || 'none' }}
+        run: |
+          chmod +x scripts/build-trollstore.sh
+          bash scripts/build-trollstore.sh
+
+      - name: List build artifacts
+        if: always()
+        run: |
+          echo "== build/ =="
+          ls -lh build/ || true
+          echo "== xcodebuild.log tail (on failure) =="
+          tail -n 120 build/xcodebuild.log 2>/dev/null || true
+
+      - name: Upload TIPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicFree-TrollStore-${{ github.sha }}
+          path: build/*.tipa
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log-${{ github.sha }}
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          {
+            echo "## MusicFree TrollStore 构建结果"
+            echo ""
+            echo "- 产物：\`build/MusicFree.trollstore.tipa\`"
+            echo "- Bundle ID：\`app.musicfree.trollstore\`"
+            echo "- New Architecture：\`${NEW_ARCH:-0}\`"
+            echo "- 签名方式：\`${SIGN_TOOL:-none}\`（免 Apple 证书，TrollStore 安装时伪签）"
+            echo ""
+            echo "下载 artifact 后改名为 \`.tipa\`，直接丢进 TrollStore 安装。"
+          } >> "$GITHUB_STEP_SUMMARY"

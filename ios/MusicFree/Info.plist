@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>MusicFree</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<!-- 插件音源大量使用 http:// 与自签名 https，侧载包不受 App Store ATS 审核约束，放开 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<!-- react-native-image-picker 的 launchImageLibrary 必需，缺失会直接 crash -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于选择歌单封面、自定义主题背景与本地图片</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于把歌词封面等图片保存到相册</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍摄歌单封面（本版本未启用相机）</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>本应用不使用麦克风</string>
+
+	<!-- react-native-track-player 后台播放 / 锁屏与控制中心 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+	</array>
+
+	<!-- 允许"文件"App 向 Documents 导入本地音乐与 .js 插件，并支持"打开方式" -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
+	<!-- bootstrap.ts 的 extraMakeup 处理 musicfree://install/<url> 安装插件 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.musicfree.trollstore</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>musicfree</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+</dict>
+</plist>

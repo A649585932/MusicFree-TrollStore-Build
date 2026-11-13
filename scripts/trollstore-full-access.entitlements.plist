@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  可选：TrollStore "全盘访问" 版 entitlements。
+	  用法：SIGN_TOOL=ldid 时把 build-trollstore.sh 里的 ENTITLEMENTS 指向本文件，
+	       或 cp 本文件到 scripts/trollstore.entitlements.plist。
+
+	  作用：拿到平台应用身份并绕开 App Sandbox，可直接读 /var/mobile/Media、
+	        其他 App 的共享目录，适合"导入全盘本地音乐"的场景。
+
+	  代价 / 风险（务必读）：
+	   1. com.apple.private.security.no-container 会让 NSHomeDirectory() 变成
+	      /var/mobile，react-native-fs 的 DocumentDirectoryPath 也随之变化，
+	      pathConst.ts 里基于 Documents 的 plugins/ log/ data/ 等路径
+	      可能落到 /var/mobile/Documents 并创建失败 → bootstrap Fatal。
+	      启用后请同步把 pathConst.ts 的 basePath 改成固定绝对路径。
+	   2. platform-application 会让沙盒部分收紧（IOKit user client 需要逐项
+	      例外 entitlement）；按官方 README，no-sandbox + platform-application
+	      组合要访问自身数据容器，需补 AppDataContainers（已加在下面）。
+	   3. 绝不要加入 banned entitlements（iOS 15 / A12+ 启动即崩）：
+	      com.apple.private.cs.debugger / dynamic-codesigning /
+	      com.apple.private.skip-library-validation
+	   4. 绝不要顺手加 get-task-allow：iOS 16+ 会触发 Developer Mode
+	      （安装结果 182 需重启 / 183 arm 失败）。
+	   5. 绝大多数场景不需要这份：通过"文件"App 用
+	      UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace
+	      把音乐导入 App 的 Documents 即可。
+	-->
+	<key>application-identifier</key>
+	<string>app.musicfree.trollstore</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>0000000000</string>
+
+	<key>platform-application</key>
+	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>com.apple.private.security.storage.AppDataContainers</key>
+	<true/>
+</dict>
+</plist>
