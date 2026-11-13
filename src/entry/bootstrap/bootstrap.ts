@@ -106,24 +106,26 @@ async function bootstrapImpl() {
     trace("配置初始化完成");
     logger.mark("配置初始化完成");
 
-    // 加载插件（带超时保护：插件多时 setup 会逐个读文件+执行 js，
-    // 第二次启动因为已有插件而变慢。超过 3 秒就先放行，后台继续加载。）
-    await Promise.race([
-        PluginManager.setup()
-            .then(() => {
-                logger.mark("插件初始化完成");
-                trace("插件初始化完成");
-            })
-            .catch(e => {
-                errorLog("插件初始化失败", e);
-            }),
-        new Promise<void>(resolve =>
-            setTimeout(() => {
-                trace("插件初始化超时，先放行界面");
-                resolve();
-            }, 3000),
-        ),
-    ]);
+    // 加载插件。
+    //
+    // 关于二次启动卡顿：
+    //   PluginManager.setup() 会 readFile + new Function() 编译每个插件 js。
+    //   iOS 的 JS 是单线程，编译期间整个 UI 冻结，这里用 Promise.race
+    //   加超时是**无效的**（同步阻塞根本不回到事件循环）。
+    //
+    //   真正的修复在 PluginManager.setup() 内部：
+    //     1. 有缓存时走懒加载，不再重复编译（lazyLoadPlugin 默认开启）；
+    //     2. 首次装载后 300ms 就写缓存（原来是 10 秒，用户早退出了）。
+    //
+    //   这里保持 await，确保后续 TrackPlayer 能拿到已就绪的插件。
+    await PluginManager.setup()
+        .then(() => {
+            logger.mark("插件初始化完成");
+            trace("插件初始化完成");
+        })
+        .catch(e => {
+            errorLog("插件初始化失败", e);
+        });
 
     // 内置音源：后台增量补齐，不阻塞启动
     installBuiltinPluginsIfNeeded().catch(e => {
