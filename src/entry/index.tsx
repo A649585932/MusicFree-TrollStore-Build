@@ -51,8 +51,22 @@ export default function Pages() {
                             initialRouteName={routes[0].path}
                             screenOptions={{
                                 headerShown: false,
-                                animation: "slide_from_right",
-                                animationDuration: 100,
+                                // iOS 默认的原生 push 动画比固定 slide_from_right 更跟手，
+                                // 且 animationDuration 在 iOS 原生栈上会被忽略，
+                                // 之前写死 100ms 反而让 Android 也显得生硬。
+                                animation:
+                                    Platform.OS === "ios"
+                                        ? "default"
+                                        : "slide_from_right",
+                                animationDuration:
+                                    Platform.OS === "android" ? 180 : undefined,
+                                // 跟手返回手势（iOS 边缘滑返）
+                                gestureEnabled: Platform.OS === "ios",
+                                fullScreenGestureEnabled:
+                                    Platform.OS === "ios",
+                                contentStyle: {
+                                    backgroundColor: "transparent",
+                                },
                             }}>
                             {routes.map(route => (
                                 <Stack.Screen
