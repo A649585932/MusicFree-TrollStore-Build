@@ -5,6 +5,10 @@ import * as DocumentPicker from "expo-document-picker";
 import Loading from "@/components/base/loading";
 
 import PluginManager, { useSortedPlugins } from "@/core/pluginManager";
+import {
+    fetchBuiltinPluginEntries,
+    installBuiltinPlugins,
+} from "@/core/pluginManager/builtinInstaller";
 import { trace } from "@/utils/log";
 
 import Toast from "@/utils/toast";
@@ -37,6 +41,13 @@ export default function PluginList() {
     const navigator = useNavigation<any>();
 
     const menuOptions: IOption[] = [
+        {
+            icon: "circle-stack",
+            title: "一键安装内置音源（6 平台）",
+            async onPress() {
+                onInstallBuiltinClick();
+            },
+        },
         {
             icon: "bookmark-square",
             title: t("pluginSetting.menu.subscriptionSetting"),
@@ -215,6 +226,52 @@ export default function PluginList() {
         setLoading(false);
     }
 
+    /** 一键安装内置音源（padao 六平台） */
+    async function onInstallBuiltinClick() {
+        setLoading(true);
+        try {
+            const entries = await fetchBuiltinPluginEntries();
+            if (!entries.length) {
+                Toast.warn("内置音源清单拉取失败，请检查网络");
+                return;
+            }
+            const r = await installBuiltinPlugins({ force: true });
+            if (r.failCount === 0) {
+                Toast.success(`已安装 ${r.okCount} 个音源`);
+            } else if (r.okCount === 0) {
+                Toast.warn(`全部安装失败（${r.failCount} 个）`, {
+                    type: "warn",
+                    actionText: t("common.view"),
+                    onActionClick: () => {
+                        showDialog("SimpleDialog", {
+                            title: "安装失败详情",
+                            content: r.failures
+                                .map(f => `${f.name}: ${f.reason}`)
+                                .join("\n-----\n"),
+                        });
+                    },
+                });
+            } else {
+                Toast.warn(`成功 ${r.okCount} 个，失败 ${r.failCount} 个`, {
+                    type: "warn",
+                    actionText: t("common.view"),
+                    onActionClick: () => {
+                        showDialog("SimpleDialog", {
+                            title: "部分安装失败",
+                            content: r.failures
+                                .map(f => `${f.name}: ${f.reason}`)
+                                .join("\n-----\n"),
+                        });
+                    },
+                });
+            }
+        } catch (e: any) {
+            Toast.warn(`安装出错：${e?.message ?? e}`);
+        } finally {
+            setLoading(false);
+        }
+    }
+
     async function onUpdateAllClick() {
         const plugins = PluginManager.getEnabledPlugins();
         setLoading(true);
@@ -290,6 +347,10 @@ export default function PluginList() {
                                 header: t("pluginSetting.menu.installPlugin"),
                                 candidates: [
                                     {
+                                        value: "安装内置音源",
+                                        title: "一键安装内置音源（QQ/网易云等 6 平台）",
+                                    },
+                                    {
                                         value: "从本地安装插件",
                                         title: t("pluginSetting.fabOptions.installFromLocal"),
                                     },
@@ -307,7 +368,9 @@ export default function PluginList() {
                                     },
                                 ],
                                 onPress(item) {
-                                    if (item.value === "从本地安装插件") {
+                                    if (item.value === "安装内置音源") {
+                                        onInstallBuiltinClick();
+                                    } else if (item.value === "从本地安装插件") {
                                         onInstallFromLocalClick();
                                     } else if (
                                         item.value === "从网络安装插件"
