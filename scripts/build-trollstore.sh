@@ -22,7 +22,7 @@ WORKSPACE="${WORKSPACE:-ios/MusicFree.xcworkspace}"
 CONFIGURATION="${CONFIGURATION:-Release}"
 SDK="${SDK:-iphoneos}"
 APP_NAME="${APP_NAME:-MusicFree.app}"
-BUNDLE_ID="${BUNDLE_ID:-app.musicfree.trollstore}"
+BUNDLE_ID="${BUNDLE_ID:-app.musicfree.ios}"
 OUTPUT_NAME="${OUTPUT_NAME:-MusicFree.trollstore.tipa}"
 NEW_ARCH="${NEW_ARCH:-0}"
 # auto | ldid | codesign | none
