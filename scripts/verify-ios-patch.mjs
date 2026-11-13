@@ -220,7 +220,12 @@ check("entitlements 与 CI workflow 齐全", () => {
     assert(exists("scripts/trollstore-full-access.entitlements.plist"), "缺少可选全盘 entitlements");
     assert(exists("TROLLSTORE.md"), "缺少 TROLLSTORE.md 说明");
     const wf = read(".github/workflows/build-trollstore.yml");
-    has(wf, "runs-on: macos-14", "CI 必须跑在 macOS runner");
+    // 实测 macos-14 在该账号上已不再派活（job 秒 cancelled / 0 step），
+    // macos-15 与 macos-latest 正常，因此只要命中任一可用 macOS 标签即可。
+    assert(
+        /runs-on:\s*macos-(?:15|latest)\b/.test(wf),
+        "CI 必须跑在可用的 macOS runner（macos-15 / macos-latest）",
+    );
     has(wf, "upload-artifact@v4", "CI 未上传产物");
     const stripXmlComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "");
     const entRaw = read("scripts/trollstore.entitlements.plist");
