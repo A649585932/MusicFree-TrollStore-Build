@@ -32,6 +32,37 @@
 	<string>AppIcon</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon60x60</string>
+	<!--
+	  CFBundleIcons 是 iOS 13+ 读取图标的主入口。
+	  多任务卡片(App Switcher)、设置-储存空间、通知都走这里。
+	  缺了它 → 桌面有图标但多任务卡片空白（正是我们遇到的问题）。
+	  CFBundleIconFiles 里的名字不带扩展名，iOS 会自动找 @2x/@3x。
+	-->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+				<string>AppIcon76x76</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
