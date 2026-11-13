@@ -195,18 +195,22 @@ function HomeDrawer(props: any) {
                 </View>
 
                 <Divider />
-                <ListItem
-                    withHorizontalPadding
-                    onPress={() => {
-                        // 仅安卓生效
-                        BackHandler.exitApp();
-                    }}>
-                    <ListItem.ListItemIcon
-                        icon={"home-outline"}
-                        width={rpx(48)}
-                    />
-                    <ListItem.Content title={t("sidebar.backToDesktop")} />
-                </ListItem>
+                {/* iOS 没有"返回桌面"和"主动退出应用"的公开 API，
+                    这两个入口点了没反应，仅在 Android 上保留 */}
+                {Platform.OS === "android" ? (
+                    <ListItem
+                        withHorizontalPadding
+                        onPress={() => {
+                            BackHandler.exitApp();
+                        }}>
+                        <ListItem.ListItemIcon
+                            icon={"home-outline"}
+                            width={rpx(48)}
+                        />
+                        <ListItem.Content title={t("sidebar.backToDesktop")} />
+                    </ListItem>
+                ) : null}
+                {Platform.OS === "android" ? (
                 <ListItem
                     withHorizontalPadding
                     onPress={async () => {
@@ -219,6 +223,7 @@ function HomeDrawer(props: any) {
                     />
                     <ListItem.Content title={t("sidebar.exitApp")} />
                 </ListItem>
+                ) : null}
             </DrawerContentScrollView>
         </>
     );
