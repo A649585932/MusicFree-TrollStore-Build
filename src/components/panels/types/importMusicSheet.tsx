@@ -17,13 +17,17 @@ import { useI18N } from "@/core/i18n";
 import ThemeText from "@/components/base/themeText";
 import {
     PLATFORM_LABEL,
-    parseMultipleSheetLinks,
-    resolveSheetShareLink,
+    extractUrls,
+    parseSheetShareLink,
     type IParsedSheetLink,
 } from "@/utils/parseSheetLink";
-import axios from "axios";
+import {
+    extractIdLocally,
+    followRedirects,
+    isShortLink,
+} from "@/utils/resolveShortLink";
 
-/** 按平台优先挑选插件：QQ 歌单优先 QQ 系插件，网易云优先网易云系插件 */
+/** 按平台优先挑选插件 */
 function pickPluginsForSheet(link: IParsedSheetLink) {
     const all = PluginManager.getSortedPluginsWithAbility("importMusicSheet");
     if (link.platform === "unknown") {
@@ -35,6 +39,71 @@ function pickPluginsForSheet(link: IParsedSheetLink) {
         return keyword.some(k => name.includes(k.toLowerCase()));
     });
     return matched.length ? matched : all;
+}
+
+/**
+ * 把一条分享链接解析成「可以喂给插件的候选值」列表。
+ *
+ * 插件（padao 系列）的 resolveSheetId 支持三种输入：
+ *   1. 纯 id 数字        → 最稳，优先用
+ *   2. 标准长链          → 次之
+ *   3. 原始短链          → 插件自己处理不了（同步逻辑），仅兜底
+ *
+ * 所以这里依次尝试：本地提取 id → 跟随跳转再提取 → 原始 URL。
+ */
+async function buildCandidates(rawUrl: string): Promise<IParsedSheetLink & { values: string[] }> {
+    const base = parseSheetShareLink(rawUrl) ?? {
+        platform: "unknown" as const,
+        id: null,
+        normalizedUrl: rawUrl,
+        rawUrl,
+        rawText: rawUrl,
+    };
+
+    const values: string[] = [];
+    const push = (v: string | null | undefined) => {
+        const s = (v ?? "").trim();
+        if (s && !values.includes(s)) {
+            values.push(s);
+        }
+    };
+
+    // 1) 本地提取
+    const localId = extractIdLocally(rawUrl, base.platform);
+    if (localId) {
+        push(localId); // 纯数字 id 优先
+        if (base.platform === "qq") {
+            push(`https://y.qq.com/n/ryqq/playlist/${localId}`);
+        } else if (base.platform === "netease") {
+            push(`https://music.163.com/playlist?id=${localId}`);
+        }
+    }
+    // 原始链接（保留 uct2 等参数）
+    push(rawUrl);
+
+    // 2) 短链：跟随跳转后再提取
+    if (!localId && isShortLink(rawUrl)) {
+        const finalUrl = await followRedirects(rawUrl);
+        if (finalUrl && finalUrl !== rawUrl) {
+            const id2 = extractIdLocally(finalUrl, base.platform);
+            if (id2) {
+                // 跳转拿到的 id 优先级最高，插到最前面
+                values.unshift(id2);
+                if (base.platform === "qq") {
+                    values.unshift(`https://y.qq.com/n/ryqq/playlist/${id2}`);
+                } else if (base.platform === "netease") {
+                    values.unshift(`https://music.163.com/playlist?id=${id2}`);
+                }
+            }
+            push(finalUrl);
+        }
+    }
+
+    return {
+        ...base,
+        id: values.find(v => /^\d{4,}$/.test(v)) ?? base.id,
+        values,
+    };
 }
 
 export default function ImportMusicSheet() {
@@ -54,12 +123,19 @@ export default function ImportMusicSheet() {
                     return;
                 }
                 setClipText(text);
-                const parsed = parseMultipleSheetLinks(text);
+                const urls = extractUrls(text);
+                const parsed: IParsedSheetLink[] = [];
+                for (const u of urls) {
+                    const p = parseSheetShareLink(u);
+                    if (p) {
+                        parsed.push(p);
+                    }
+                }
                 if (parsed.length) {
                     setClipLinks(parsed);
                 }
             } catch {
-                // 剪贴板不可用就跳过
+                // 剪贴板不可用
             }
         })();
         return () => {
@@ -67,94 +143,90 @@ export default function ImportMusicSheet() {
         };
     }, []);
 
-    /** 统一导入流程：解析 → 调插件 → 成功后确认加入歌单 */
+    /** 统一导入流程 */
     const runImport = async (plugin: any, text: string, closePanel: () => void) => {
-        // 先用离线解析拿到列表，再对每条做异步解析（短链会跟随跳转）
-        const quick = parseMultipleSheetLinks(text);
-        const follow = async (u: string): Promise<string | null> => {
-            try {
-                const resp = await axios.get(u, {
-                    timeout: 12000,
-                    maxRedirects: 8,
-                    validateStatus: () => true,
-                    headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X)" },
-                });
-                // axios 在 RN 里拿到的是最终 URL（若有 request.responseURL）
-                const finalUrl =
-                    (resp.request as any)?.responseURL ||
-                    (resp as any)?.request?.responseURL;
-                return typeof finalUrl === "string" ? finalUrl : null;
-            } catch {
-                return null;
-            }
-        };
-        const shareLinks: IParsedSheetLink[] = [];
-        for (const q of quick) {
-            const r = await resolveSheetShareLink(q.rawUrl, follow);
-            shareLinks.push(r ?? q);
-        }
-        if (!shareLinks.length) {
-            // 剪贴板里可能是插件订阅、单曲链接等，给出更精确的提示
-            Toast.warn("没有识别到歌单链接，请粘贴 QQ音乐/网易云 的分享链接");
+        if (!plugin) {
+            Toast.warn("还没有可用音源插件，请先在「插件管理 → 一键安装内置音源」");
             return;
+        }
+
+        const urls = extractUrls(text);
+        if (!urls.length) {
+            // 用户可能直接粘了纯数字 id
+            const digits = text.trim();
+            if (/^\d{4,}$/.test(digits)) {
+                urls.push(digits);
+            } else {
+                Toast.warn("没有识别到链接，请粘贴 QQ音乐/网易云 的分享链接");
+                return;
+            }
         }
 
         closePanel();
         Toast.success(t("panel.importMusicSheet.importing"));
 
-        for (const link of shareLinks) {
-            if (!plugin) {
-                Toast.warn("还没有可用音源插件，请先在「插件管理」里订阅");
-                return;
-            }
-            const candidates = pickPluginsForSheet(link);
+        let okCount = 0;
+        let lastError = "";
+
+        for (const rawUrl of urls) {
+            const enriched = await buildCandidates(rawUrl);
+            const candidates = pickPluginsForSheet(enriched);
             const ordered = [
                 plugin,
-                ...candidates.filter(c => c.hash !== plugin.hash),
+                ...candidates.filter((c: any) => c.hash !== plugin.hash),
             ];
 
             let imported = false;
-            for (const candidate of ordered) {
-                try {
-                    const result = await candidate.methods.importMusicSheet(
-                        link.normalizedUrl,
-                    );
-                    if (result && result.length > 0) {
-                        imported = true;
-                        showDialog("SimpleDialog", {
-                            title: t("panel.importMusicSheet.prepareImport"),
-                            content: `${
-                                PLATFORM_LABEL[link.platform]
-                            } ${t("panel.importMusicSheet.foundSongs", {
-                                count: result.length,
-                            })}`,
-                            onOk() {
-                                showPanel("AddToMusicSheet", {
-                                    musicItem: result,
-                                });
-                            },
-                        });
-                        break;
+
+            // 依次尝试每个插件的每个候选值
+            outer: for (const candidate of ordered) {
+                for (const value of enriched.values) {
+                    try {
+                        const result = await candidate.methods.importMusicSheet(value);
+                        if (result && result.length > 0) {
+                            imported = true;
+                            okCount++;
+                            showDialog("SimpleDialog", {
+                                title: t("panel.importMusicSheet.prepareImport"),
+                                content: `${
+                                    PLATFORM_LABEL[enriched.platform]
+                                } ${t("panel.importMusicSheet.foundSongs", {
+                                    count: result.length,
+                                })}`,
+                                onOk() {
+                                    showPanel("AddToMusicSheet", {
+                                        musicItem: result,
+                                    });
+                                },
+                            });
+                            break outer;
+                        }
+                    } catch (e: any) {
+                        lastError = e?.message ?? "";
                     }
-                } catch {
-                    // 换下一个插件
                 }
             }
 
             if (!imported) {
                 Toast.warn(
-                    `${PLATFORM_LABEL[link.platform]}：${t(
-                        "panel.importMusicSheet.invalidLink",
-                    )}`,
+                    `${PLATFORM_LABEL[enriched.platform]}：${
+                        lastError ||
+                        t("panel.importMusicSheet.invalidLink")
+                    }`,
                 );
             }
+        }
+
+        if (okCount === 0 && urls.length) {
+            // 全部失败时给一次更明确的提示
+            Toast.warn("导入失败：请确认链接有效，或在插件管理里换一个音源插件试试");
         }
     };
 
     const openInput = (plugin: any, prefill?: string) => {
         showPanel("SimpleInput", {
             title: t("panel.importMusicSheet.title"),
-            placeholder: "粘贴歌单分享链接，如 https://music.163.com/playlist?id=xxx",
+            placeholder: "粘贴歌单分享链接或歌单ID",
             hints: plugin?.instance?.hints?.importMusicSheet,
             maxLength: 2000,
             defaultValue: prefill ?? "",
@@ -178,31 +250,21 @@ export default function ImportMusicSheet() {
                             fontColor="textSecondary"
                             fontSize="subTitle"
                             style={{ paddingVertical: rpx(10) }}>
-                            支持 QQ音乐 / 网易云音乐 的歌单分享链接或分享文案
+                            支持 QQ音乐 / 网易云音乐 的歌单链接、分享文案，或直接输入歌单 ID
                         </ThemeText>
                     </View>
 
-                    {/* 从剪贴板一键导入：最显眼的位置 */}
                     {clipLinks.length ? (
-                        <View
-                            style={{
-                                paddingHorizontal: rpx(24),
-                                paddingBottom: rpx(8),
-                            }}>
-                            <ThemeText
-                                fontSize="subTitle"
-                                style={{ paddingVertical: rpx(8) }}>
-                                检测到剪贴板内容：
+                        <View style={{ paddingHorizontal: rpx(24), paddingBottom: rpx(8) }}>
+                            <ThemeText fontSize="subTitle" style={{ paddingVertical: rpx(8) }}>
+                                检测到剪贴板：
                             </ThemeText>
                             {clipLinks.map(link => (
                                 <ListItem
                                     key={link.normalizedUrl}
                                     withHorizontalPadding
                                     onPress={() => {
-                                        openInput(
-                                            firstPlugin,
-                                            link.rawText || link.normalizedUrl,
-                                        );
+                                        openInput(firstPlugin, link.rawUrl);
                                     }}>
                                     <ListItem.Content
                                         title={`导入 ${PLATFORM_LABEL[link.platform]}${
@@ -214,14 +276,11 @@ export default function ImportMusicSheet() {
                         </View>
                     ) : null}
 
-                    {/* 手动粘贴入口：始终存在，不依赖插件是否支持 importMusicSheet */}
                     <ListItem
                         withHorizontalPadding
                         onPress={() => {
                             if (!firstPlugin) {
-                                Toast.warn(
-                                    "还没有音源插件，请先去「设置 → 插件管理」订阅",
-                                );
+                                Toast.warn("还没有音源插件，请先「一键安装内置音源」");
                                 return;
                             }
                             openInput(firstPlugin, clipText || undefined);
@@ -231,7 +290,7 @@ export default function ImportMusicSheet() {
                             description={
                                 validPlugins.length
                                     ? `将使用「${firstPlugin?.name}」解析`
-                                    : "尚无音源插件，请先订阅"
+                                    : "尚无音源插件"
                             }
                         />
                     </ListItem>
@@ -250,33 +309,27 @@ export default function ImportMusicSheet() {
                                 fontColor="textSecondary"
                                 fontSize="subTitle"
                                 style={{ paddingHorizontal: rpx(24), paddingVertical: rpx(8) }}>
-                                或选择指定插件解析：
+                                或选择指定插件：
                             </ThemeText>
                             <FlatList
                                 data={validPlugins}
-                                keyExtractor={plugin => plugin.hash}
+                                keyExtractor={(p: any) => p.hash}
                                 style={{ marginBottom: safeAreaInsets.bottom }}
-                                renderItem={({ item: plugin }) => (
+                                renderItem={({ item: p }: any) => (
                                     <ListItem
                                         withHorizontalPadding
-                                        key={`${plugin.hash}`}
-                                        onPress={() =>
-                                            openInput(plugin, clipText || undefined)
-                                        }>
-                                        <ListItem.Content title={plugin.name} />
+                                        key={p.hash}
+                                        onPress={() => openInput(p, clipText || undefined)}>
+                                        <ListItem.Content title={p.name} />
                                     </ListItem>
                                 )}
                             />
                         </View>
                     ) : (
-                        <View
-                            style={{
-                                paddingHorizontal: rpx(24),
-                                paddingTop: rpx(16),
-                            }}>
+                        <View style={{ paddingHorizontal: rpx(24), paddingTop: rpx(16) }}>
                             <ThemeText fontColor="textSecondary">
                                 当前没有支持「导入歌单」的插件。{"\n"}
-                                请到「设置 → 插件管理 → 订阅插件」添加音源后重试。
+                                请到「设置 → 插件管理 → 一键安装内置音源」。
                             </ThemeText>
                         </View>
                     )}
