@@ -3,26 +3,32 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  默认 entitlements：只有走 SIGN_TOOL=ldid / codesign 时才会写到二进制上。
-	  默认构建 SIGN_TOOL=none，这份文件不参与，TrollStore 安装时自行补签。
+	  Entitlements baked into the main binary BEFORE packaging.
 
-	  故意不放 get-task-allow：
-	    TrollStore RootHelper 在 iOS 16+ 检测到 get-task-allow 等调试类
-	    entitlement 时会标记 requiresDevMode，返回 182（需开启开发者模式并重启）
-	    或 183（arm 失败）。MusicFree 是播放器，不需要 JIT / 调试，
-	    去掉它可以让安装一路绿灯。需要 JIT 时再单独加回。
+	  Why this file must exist and must NOT contain get-task-allow:
+	  TrollStore RootHelper signApp() dumps the existing entitlements from the
+	  main executable. If the executable has NONE, it injects a fallback dict
+	  that includes get-task-allow=true. On iOS 16+, any binary carrying
+	  get-task-allow requires Developer Mode to be enabled, otherwise the
+	  process is killed on launch (instant crash / no icon refresh).
 
-	  也绝不放这些"禁用 entitlement"（iOS 15 / A12+ 会启动即崩）：
-	    com.apple.private.cs.debugger
-	    dynamic-codesigning
-	    com.apple.private.skip-library-validation
+	  By pre-signing with this non-empty dict we keep application-identifier
+	  (normal app behaviour) while dodging both the fallback injection and the
+	  Developer Mode requirement.
+
+	  Never add here:
+	    get-task-allow, task_for_pid-allow, com.apple.system-task-ports*,
+	    com.apple.private.cs.debugger            -> forces Developer Mode
+	    dynamic-codesigning,
+	    com.apple.private.skip-library-validation -> banned on iOS 15/A12+
 	-->
 	<key>application-identifier</key>
 	<string>app.musicfree.trollstore</string>
 	<key>com.apple.developer.team-identifier</key>
-	<string>0000000000</string>
-
-	<!-- 后台播放由 Info.plist 的 UIBackgroundModes=audio 声明，无需 entitlement -->
-	<!-- 文件共享由 UIFileSharingEnabled 声明，无需 entitlement -->
+	<string>TROLLTROLL</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>app.musicfree.trollstore</string>
+	</array>
 </dict>
 </plist>
