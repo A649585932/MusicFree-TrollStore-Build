@@ -111,10 +111,18 @@ class PluginManager implements IPluginManager, IInjectable {
                     // 如果存在缓存信息
                     let plugin: Plugin;
                     let isLazyLoad = false;
-                    if (
+                    // 懒加载策略（修复二次启动卡顿）：
+                    //   之前默认 false，导致每次启动都要 readFile + Function()
+                    //   编译全部插件（6 个约 1MB js），而 iOS 的 JS 是单线程，
+                    //   编译期间整个 UI 冻结 → 表现为"第二次启动很慢"。
+                    //   现在只要**有缓存**就懒加载，避免重复编译。
+                    //   配置项仍可显式关闭（设为 false 且明确想全量加载）。
+                    const lazyEnabled =
                         this.appConfigService.getConfig(
                             "basic.lazyLoadPlugin",
-                        ) &&
+                        ) !== false;
+                    if (
+                        lazyEnabled &&
                         pluginCacheStore.contains(pluginFileItem.path)
                     ) {
                         isLazyLoad = true;
@@ -148,18 +156,28 @@ class PluginManager implements IPluginManager, IInjectable {
             }
 
             this.setPlugins(allPlugins);
-            // 异步初始化插件
 
-            delay(10_000, true).then(async () => {
+            // 关键修复：把「写缓存」提前并缩短延迟。
+            // 之前是 delay(10_000) 后才 ensureMounted + updatePluginCache，
+            // 用户通常在 10 秒内就退出，导致缓存永远为空，
+            // 于是每次启动都走全量编译 —— 这就是二次启动卡顿的根因。
+            delay(300, true).then(async () => {
                 for (let i = 0; i < allPlugins.length; ++i) {
                     const plugin = allPlugins[i];
-
                     if (plugin.state === PluginState.Initializing) {
-                        await plugin.ensureMounted();
-                        this.updatePluginCache(plugin);
+                        try {
+                            await plugin.ensureMounted();
+                            this.updatePluginCache(plugin);
+                        } catch {
+                            // 单个插件失败不影响其他
+                        }
                     }
                 }
             });
+
+            // 异步初始化插件
+
+            // （原 10 秒延迟的缓存写入已前移到上方 300ms）
         } catch (e: any) {
             showToast({
                 type: "warn",
