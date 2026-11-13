@@ -108,11 +108,11 @@ async function bootstrapImpl() {
     logger.mark("插件初始化完成");
     trace("插件初始化完成");
 
-    // 内置音源：首次启动自动安装，装完打标记不再打扰
-    await installBuiltinPluginsIfNeeded().catch(e => {
+    // 内置音源：后台增量补齐，不阻塞启动
+    installBuiltinPluginsIfNeeded().catch(e => {
         errorLog("内置音源初始化失败", e);
     });
-    logger.mark("内置音源检查完成");
+    logger.mark("内置音源已排入后台");
 
     await initTrackPlayer(logger).catch(err => {
         // 初始化播放器出错，延迟初始化
@@ -161,23 +161,34 @@ async function setupFolder() {
 }
 
 /**
- * 内置音源：首次启动自动装好，让用户装上就能搜歌。
- * 具体安装逻辑在 builtinInstaller.ts，手动「一键安装」也复用同一套。
+ * 内置音源：每次启动增量补齐，用户无需任何操作。
+ *
+ * 行为：
+ *   - 拉取订阅清单，逐个检查哪些还没装，只装缺的；
+ *   - 已装的跳过（不会重复下载）；
+ *   - 用户手动删掉的，下次启动自动补回（这就是「内置」的语义）；
+ *   - 全程静默，失败只记日志，绝不阻断启动。
  */
 async function installBuiltinPluginsIfNeeded() {
     try {
         const r = await installBuiltinPlugins({ force: false });
+
         if (r.okCount > 0) {
-            trace(`内置音源已安装 ${r.okCount} 个：${r.names.join("、")}`);
+            trace(
+                `\u5185\u7f6e\u97f3\u6e90\u8865\u9f50 ${r.okCount} \u4e2a\uff1a${r.names.join("\u3001")}`,
+            );
             setTimeout(() => {
-                Toast.success(`已内置 ${r.okCount} 个音源`);
-            }, 1500);
+                Toast.success(`\u5df2\u81ea\u52a8\u5b89\u88c5 ${r.okCount} \u4e2a\u97f3\u6e90`);
+            }, 2000);
+        } else if (r.skippedCount > 0) {
+            trace(`\u5185\u7f6e\u97f3\u6e90\u5df2\u9f50\u5168\uff08${r.skippedCount} \u4e2a\uff09`);
         }
+
         if (r.failCount > 0) {
-            errorLog("部分内置音源安装失败", r.failures);
+            errorLog("\u90e8\u5206\u5185\u7f6e\u97f3\u6e90\u5b89\u88c5\u5931\u8d25", r.failures);
         }
     } catch (e) {
-        errorLog("内置音源初始化失败", e);
+        errorLog("\u5185\u7f6e\u97f3\u6e90\u521d\u59cb\u5316\u5931\u8d25", e);
     }
 }
 
