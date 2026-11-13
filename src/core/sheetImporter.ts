@@ -309,17 +309,94 @@ export async function fetchQQSheet(sheetId: string): Promise<IImportResult> {
  * @param input 用户粘贴的链接 / 分享文案 / 纯数字 id
  * @param preferred 当输入是纯数字、无法判断平台时的偏好
  */
+/**
+ * 跟随短链跳转（纯 fetch 实现，RN 兼容）。
+ *
+ * 为什么不用 axios：
+ *   React Native 的 XMLHttpRequest 不会暴露 responseURL，
+ *   而 axios 在 RN 上拿不到 3xx 的 location 头。
+ *   这里用 fetch + redirect:"manual" 自己读 location。
+ */
+async function followShortLink(
+    url: string,
+    maxHops = 8,
+): Promise<string | null> {
+    let current = url;
+    for (let i = 0; i < maxHops; i++) {
+        try {
+            const resp = await fetch(current, {
+                method: "GET",
+                redirect: "manual",
+                headers: {
+                    "User-Agent": UA_IOS,
+                    Accept: "text/html,*/*",
+                },
+            });
+
+            const status = resp.status;
+            const loc = resp.headers.get("location");
+
+            if (status >= 300 && status < 400 && loc) {
+                // 相对路径转绝对
+                if (/^https?:\/\//i.test(loc)) {
+                    current = loc;
+                } else if (loc.startsWith("//")) {
+                    current = "https:" + loc;
+                } else if (loc.startsWith("/")) {
+                    const u = new URL(current);
+                    current = `${u.protocol}//${u.host}${loc}`;
+                } else {
+                    const u = new URL(current);
+                    const dir = u.pathname.replace(/\/[^/]*$/, "/");
+                    current = `${u.protocol}//${u.host}${dir}${loc}`;
+                }
+                continue;
+            }
+
+            // 2xx 或没有 location：认为到终点了
+            return current;
+        } catch {
+            return current;
+        }
+    }
+    return current;
+}
+
+/** 短链特征判定 */
+function looksLikeShortLink(url: string): boolean {
+    return (
+        /c\d*\.y\.qq\.com\/base\/fcgi-bin\/u/i.test(url) ||
+        /u\?__=/i.test(url) ||
+        /163cn\.tv/i.test(url) ||
+        /url\.cn\//i.test(url)
+    );
+}
+
 export async function importSheetDirect(
     input: string,
     preferred?: SheetSource,
 ): Promise<IImportResult> {
-    const source =
-        detectSource(input) === "unknown"
+    let target = (input ?? "").trim();
+    let source =
+        detectSource(target) === "unknown"
             ? preferred ?? "netease"
-            : detectSource(input);
+            : detectSource(target);
+
+    // 短链：先跟跳转拿到真实地址（这一步很关键，
+    // QQ 分享出来的 c6.y.qq.com/...u?__=xxx 里没有任何 id）
+    if (looksLikeShortLink(target)) {
+        const real = await followShortLink(target);
+        if (real && real !== target) {
+            target = real;
+            const s2 = detectSource(real);
+            if (s2 !== "unknown") {
+                source = s2;
+            }
+        }
+    }
 
     if (source === "netease") {
-        const id = extractNeteaseId(input);
+        const id = extractNeteaseId(target);
         if (!id) {
             throw new Error("没能从链接里识别出网易云歌单 ID");
         }
@@ -327,9 +404,11 @@ export async function importSheetDirect(
     }
 
     if (source === "qq") {
-        const id = extractQQId(input);
+        const id = extractQQId(target);
         if (!id) {
-            throw new Error("没能从链接里识别出 QQ 歌单 ID");
+            throw new Error(
+                "没能从链接里识别出 QQ 歌单 ID（短链可能已失效，试试直接粘贴长链或歌单 ID）",
+            );
         }
         return fetchQQSheet(id);
     }
