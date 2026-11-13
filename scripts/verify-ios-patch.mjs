@@ -197,7 +197,7 @@ check("Xcode 工程 Bundle ID / 版本 / 部署目标", () => {
 });
 
 // ---------------------------------------------------------------- 7. 构建资产
-check("打包脚本关闭全部签名", () => {
+check("打包脚本关闭全部签名 + 强制伪签", () => {
     const t = read("scripts/build-trollstore.sh");
     for (const flag of [
         "CODE_SIGNING_ALLOWED=NO",
@@ -212,7 +212,32 @@ check("打包脚本关闭全部签名", () => {
     }
     has(t, 'SCHEME="${SCHEME:-MusicFreeNew}"', "scheme 名应与共享 scheme 文件一致");
     has(t, ".tipa", "产物扩展名应为 .tipa");
-    return "免签名 archive → Payload → .tipa";
+
+    // iOS 16+ 上必须伪签：否则主二进制零 entitlements -> TrollStore 注入
+    // get-task-allow -> 强制开发者模式 -> 启动秒退。默认值不能是 none。
+    assert(
+        !/SIGN_TOOL="\$\{SIGN_TOOL:-none\}"/.test(t),
+        "SIGN_TOOL 默认为 none，会导致 iOS 16+ 启动闪退",
+    );
+    has(t, "sign_nested_macho", "缺少嵌套 Mach-O 签名逻辑（hermes.framework 等）");
+    has(t, "sign_main_with_entitlements", "缺少主二进制 entitlements 签名逻辑");
+    return "免签名 archive + 主二进制 entitlements + 嵌套 Mach-O 逐个签";
+});
+
+check("AppIcon 资源已补齐", () => {
+    const iconsDir = "ios/MusicFree/Images.xcassets/AppIcon.appiconset";
+    const contents = JSON.parse(read(`${iconsDir}/Contents.json`));
+    assert(Array.isArray(contents.images), "Contents.json 缺少 images 数组");
+    const withFiles = contents.images.filter((i) => i.filename);
+    assert(
+        withFiles.length >= 9,
+        `AppIcon 只有 ${withFiles.length} 个槽位带 filename，至少需要 9 个`,
+    );
+    for (const img of withFiles) {
+        assert(exists(`${iconsDir}/${img.filename}`), `图标文件缺失：${img.filename}`);
+    }
+    assert(exists("scripts/gen_ios_icons.py"), "缺少图标生成脚本");
+    return `${withFiles.length} 个图标槽位已填充`;
 });
 
 check("entitlements 与 CI workflow 齐全", () => {
@@ -230,12 +255,12 @@ check("entitlements 与 CI workflow 齐全", () => {
     const stripXmlComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "");
     const entRaw = read("scripts/trollstore.entitlements.plist");
     const ent = stripXmlComments(entRaw);
+    // 必须非空：空 entitlements 会触发 TrollStore 注入 get-task-allow fallback
     has(ent, "application-identifier", "缺少 application-identifier");
-    // iOS 16+ 遇到 get-task-allow 会触发 Developer Mode（182/183）；
-    // 这三个是官方 banned entitlements，带上去启动即崩。
-    // 判定前剥掉 XML 注释，避免注释里的说明文字造成误报。
+    // iOS 16+ 带这些键会强制开发者模式（182/183），或直接在启动时崩溃
     for (const banned of [
         "get-task-allow",
+        "task_for_pid-allow",
         "com.apple.private.cs.debugger",
         "dynamic-codesigning",
         "com.apple.private.skip-library-validation",
@@ -245,7 +270,7 @@ check("entitlements 与 CI workflow 齐全", () => {
     const full = stripXmlComments(read("scripts/trollstore-full-access.entitlements.plist"));
     has(full, "com.apple.private.security.storage.AppDataContainers", "全盘版缺 AppDataContainers");
     assert(!full.includes("get-task-allow"), "全盘版不应含 get-task-allow");
-    return "默认 entitlements 无高危项 + 可选全盘版 + macOS CI";
+    return "默认 entitlements 非空且无高危项 + 可选全盘版 + macOS CI";
 });
 
 // ---------------------------------------------------------------- 输出
