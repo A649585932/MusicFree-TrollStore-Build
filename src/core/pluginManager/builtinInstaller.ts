@@ -143,33 +143,144 @@ export async function fetchBuiltinPluginEntries(): Promise<IBuiltinPluginEntry[]
     return entries;
 }
 
-/** 已安装插件名称集合（小写归一，便于匹配） */
-function installedNames(): string[] {
+/**
+ * 已安装插件的「指纹集合」。
+ *
+ * 之前只比名字，但插件实际名字可能带版本号或用平台字段，
+ * 比如清单里叫「QQ音乐」、装完叫「QQ音乐(1.9.26)」，
+ * 双向 includes 也覆盖不到「QQ」这种短名，导致误判成「没装」，
+ * 于是每次启动都重装一遍（用户看到反复弹「已安装 N 个音源」）。
+ *
+ * 现在同时收集：
+ *   - name（含去括号/去版本号后的主名）
+ *   - platform（qq / netease / kuwo ...）
+ *   - srcUrl 的文件名（最可靠：qq-source.plugin.v1.9.26.js）
+ */
+function installedFingerprints(): {
+    names: string[];
+    platforms: string[];
+    urlParts: string[];
+} {
+    const names: string[] = [];
+    const platforms: string[] = [];
+    const urlParts: string[] = [];
+
     try {
-        return PluginManager.getSortedPlugins()
-            .map(p => `${p.name ?? ""}`.trim().toLowerCase())
-            .filter(Boolean);
+        const plugins = PluginManager.getSortedPlugins();
+        for (const p of plugins) {
+            const rawName = `${p.name ?? ""}`.trim();
+            if (rawName) {
+                names.push(rawName.toLowerCase());
+                // 去掉括号/版本号后的主名，如「QQ音乐(1.9.26)」→「qq音乐」
+                const base = rawName
+                    .replace(/[（(].*?[）)]/g, "")
+                    .replace(/v?\d+(\.\d+)*/gi, "")
+                    .trim()
+                    .toLowerCase();
+                if (base) {
+                    names.push(base);
+                }
+            }
+
+            // platform 字段（插件内部平台标识）
+            const plat = `${(p as any).instance?.platform ?? (p as any).platform ?? ""}`
+                .trim()
+                .toLowerCase();
+            if (plat) {
+                platforms.push(plat);
+            }
+
+            // srcUrl 文件名，如 .../qq-source.plugin.v1.9.26.js
+            const srcUrl = `${(p as any).instance?.srcUrl ?? (p as any).srcUrl ?? ""}`;
+            if (srcUrl) {
+                const file = srcUrl.split("/").pop() ?? "";
+                if (file) {
+                    urlParts.push(file.toLowerCase());
+                    // 取 "-source" 前面的短标识：qq / kuwo / kugou / migu / netease
+                    const m = file.match(/^([a-z0-9]+)-/i);
+                    if (m) {
+                        urlParts.push(m[1].toLowerCase());
+                    }
+                }
+            }
+        }
     } catch {
-        return [];
+        /* 忽略 */
     }
+
+    return { names, platforms, urlParts };
+}
+
+/** 从订阅清单条目里推出该插件的候选标识 */
+function entryKeys(entry: IBuiltinPluginEntry): {
+    names: string[];
+    keys: string[];
+} {
+    const names: string[] = [];
+    const keys: string[] = [];
+
+    const rawName = (entry.name || "").trim();
+    if (rawName) {
+        names.push(rawName.toLowerCase());
+        const base = rawName
+            .replace(/[（(].*?[）)]/g, "")
+            .replace(/v?\d+(\.\d+)*/gi, "")
+            .trim()
+            .toLowerCase();
+        if (base) {
+            names.push(base);
+        }
+    }
+
+    // 从 URL 文件名里推：qq-source.plugin.v1.9.26.js → qq
+    const file = (entry.url || "").split("/").pop() ?? "";
+    if (file) {
+        keys.push(file.toLowerCase());
+        const m = file.match(/^([a-z0-9]+)-/i);
+        if (m) {
+            keys.push(m[1].toLowerCase());
+        }
+    }
+
+    return { names, keys };
 }
 
 /** 判断某个内置插件是否已经装过 */
 function isAlreadyInstalled(
     entry: IBuiltinPluginEntry,
-    names: string[],
+    fp: ReturnType<typeof installedFingerprints>,
 ): boolean {
-    const want = (entry.name || "").trim().toLowerCase();
-    if (!want) {
-        return false;
-    }
-    return names.some(have => {
-        if (!have) {
-            return false;
+    const { names, keys } = entryKeys(entry);
+
+    // 1) 名字匹配（同时支持双向 includes）
+    for (const want of names) {
+        for (const have of fp.names) {
+            if (have === want || have.includes(want) || want.includes(have)) {
+                return true;
+            }
         }
-        // 精确 / 包含（"QQ音乐" vs "QQ音乐插件"）
-        return have === want || have.includes(want) || want.includes(have);
-    });
+    }
+
+    // 2) platform 匹配：清单 url 里的短标识 vs 插件 platform 字段
+    for (const k of keys) {
+        if (fp.platforms.includes(k)) {
+            return true;
+        }
+    }
+
+    // 3) URL 文件名匹配（最可靠）
+    for (const k of keys) {
+        if (k.length < 3) {
+            continue;
+        }
+        for (const u of fp.urlParts) {
+            if (u.includes(k) || k.includes(u)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -201,12 +312,14 @@ export async function installBuiltinPlugins(config?: {
 
     const total = entries.length;
     let done = 0;
-    const names = config?.force ? [] : installedNames();
+    const fp = config?.force
+        ? { names: [], platforms: [], urlParts: [] }
+        : installedFingerprints();
 
     for (const entry of entries) {
         done++;
 
-        if (!config?.force && isAlreadyInstalled(entry, names)) {
+        if (!config?.force && isAlreadyInstalled(entry, fp)) {
             result.skippedCount++;
             config?.onProgress?.(done, total, entry.name);
             trace("内置订阅：已存在，跳过", entry.name);
