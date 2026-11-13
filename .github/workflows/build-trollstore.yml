@@ -88,7 +88,13 @@ jobs:
           fi
           ls -1 "$ICON_DIR" | head -25
           test -f "$ICON_DIR/Contents.json"
-          test -f "$ICON_DIR/icon-ios-marketing-1024x1024@1x.png"
+          # 用 Apple 标准命名占位（此前是 icon-ios-marketing-1024x1024@1x.png，
+          # 那种命名会让 Xcode 把文件名注册成 Assets.car 资源名，
+          # 导致 CFBundleIconName=AppIcon 索引不到 → 多任务卡片无图标）
+          test -f "$ICON_DIR/AppIcon1024x1024@1x.png"
+          test -f "$ICON_DIR/AppIcon60x60@2x.png"
+          test -f "$ICON_DIR/AppIcon60x60@3x.png"
+          echo "AppIcon set OK (standard naming)"
 
       - name: Static self-check (iOS shims / plist / project)
         run: |
