@@ -103,10 +103,14 @@ export default function Sheets() {
                             showPanel("CreateMusicSheet");
                         }}
                     />
+                    {/* 导入歌单：支持粘贴 QQ音乐 / 网易云 分享链接 */}
                     <IconButton
                         name="inbox-arrow-down"
                         sizeType="normal"
-                        accessibilityLabel={t("home.importPlaylist.a11y")}
+                        accessibilityLabel={
+                            t("home.importPlaylist.a11y") ??
+                            "导入歌单（支持QQ/网易云链接）"
+                        }
                         onPress={() => {
                             showPanel("ImportMusicSheet");
                         }}
