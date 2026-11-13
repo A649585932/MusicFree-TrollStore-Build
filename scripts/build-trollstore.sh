@@ -10,7 +10,7 @@
 #
 # Requires: macOS + Xcode + Node >= 18 + CocoaPods (ldid optional)
 # Usage:    bash scripts/build-trollstore.sh
-#           SCHEME=MusicFreeNew NEW_ARCH=0 SIGN_TOOL=none bash scripts/build-trollstore.sh
+#           SCHEME=MusicFreeNew NEW_ARCH=0 SIGN_TOOL=auto bash scripts/build-trollstore.sh
 # =============================================================================
 set -euo pipefail
 
@@ -25,7 +25,15 @@ APP_NAME="${APP_NAME:-MusicFree.app}"
 BUNDLE_ID="${BUNDLE_ID:-app.musicfree.trollstore}"
 OUTPUT_NAME="${OUTPUT_NAME:-MusicFree.trollstore.tipa}"
 NEW_ARCH="${NEW_ARCH:-0}"
-SIGN_TOOL="${SIGN_TOOL:-none}"
+# auto | ldid | codesign | none
+#   auto (default): use ldid if present, else codesign. Fakesigning is REQUIRED:
+#     - main executable gets clean entitlements, which stops TrollStore from
+#       injecting its get-task-allow fallback (that would force Developer Mode
+#       on iOS 16+ and kill the process at launch);
+#     - every nested Mach-O (Frameworks/*.framework, *.dylib) is ad-hoc signed,
+#       otherwise dyld refuses to map them (e.g. @rpath/hermes.framework/hermes).
+#   none: escape hatch only; the app crashes on launch on iOS 16+. See TROLLSTORE.md.
+SIGN_TOOL="${SIGN_TOOL:-auto}"
 SKIP_POD_INSTALL="${SKIP_POD_INSTALL:-0}"
 SKIP_NPM="${SKIP_NPM:-0}"
 
@@ -132,47 +140,86 @@ cp -Rp "$APP_SRC" "$STAGE_DIR/Payload/"
 find "$STAGE_DIR/Payload" -name '.DS_Store' -delete 2>/dev/null || true
 find "$STAGE_DIR/Payload" -name '__MACOSX' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
-# ---------------------------- 5. optional fakesign ---------------------------
-log "[5/6] Optional fakesign (default none: TrollStore signs on install)"
+# ---------------------------- 5. fakesign ------------------------------------
+# Two separate problems are fixed here, both required for the app to launch
+# on iOS 16+ under TrollStore:
+#
+#   a) Nested Mach-O (Frameworks/*.framework, *.dylib) carried NO signature at
+#      all because the archive was built with CODE_SIGNING_ALLOWED=NO. The main
+#      binary links @rpath/hermes.framework/hermes, and dyld refuses to map an
+#      unsigned dynamic library => instant crash. TrollStore explicitly does
+#      NOT handle frameworks ("We don't care about frameworks (yet)" in
+#      RootHelper signApp), so we must sign them here.
+#
+#   b) If the MAIN executable has zero entitlements, TrollStore injects a
+#      fallback entitlements dict containing get-task-allow=true. On iOS 16+
+#      that entitlement requires Developer Mode and the process is killed on
+#      launch. Pre-signing with a non-empty dict that omits get-task-allow
+#      prevents the injection entirely.
+log "[5/6] Fakesign (main binary with entitlements + nested Mach-O ad-hoc)"
 
-sign_with_ldid() {
-    ldid -S"$ENTITLEMENTS" "$STAGE_DIR/Payload/$APP_NAME"
-    echo "ldid fakesign done"
+APP_DIR="$STAGE_DIR/Payload/$APP_NAME"
+MAIN_EXEC="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_DIR/Info.plist" 2>/dev/null || echo MusicFree)"
+MAIN_EXEC_PATH="$APP_DIR/$MAIN_EXEC"
+
+# ---- (a) sign every nested Mach-O ad-hoc, main executable excluded ----
+sign_nested_macho() {
+    local tool="$1"
+    local signed=0
+    # Every regular file that is a Mach-O inside the bundle, skipping the main
+    # executable (handled separately with entitlements).
+    while IFS= read -r -d '' f; do
+        [ "$f" = "$MAIN_EXEC_PATH" ] && continue
+        # Cheap Mach-O sniff: read the first 4 bytes.
+        local magic
+        magic="$(head -c 4 "$f" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+        case "$magic" in
+            cffaedfe|feedfacf|cefaedfe|feedface|cafebabe|bebafeca)
+                if [ "$tool" = "ldid" ]; then
+                    ldid -S "$f" >/dev/null 2>&1 && signed=$((signed + 1)) || true
+                else
+                    codesign --force --sign - --timestamp=none "$f" >/dev/null 2>&1 && signed=$((signed + 1)) || true
+                fi
+                ;;
+        esac
+    done < <(find "$APP_DIR" -type f -print0)
+    echo "signed $signed nested Mach-O file(s)"
 }
 
-sign_with_codesign() {
-    local app="$STAGE_DIR/Payload/$APP_NAME"
-    if [ -d "$app/Frameworks" ]; then
-        find "$app/Frameworks" \( -name '*.framework' -o -name '*.dylib' -o -name '*.appex' \) -print0 |
-            while IFS= read -r -d '' item; do
-                codesign --force --sign - --timestamp=none "$item" 2>/dev/null || true
-            done
+# ---- (b) sign main executable WITH clean entitlements ----
+sign_main_with_entitlements() {
+    local tool="$1"
+    if [ "$tool" = "ldid" ]; then
+        ldid -S"$ENTITLEMENTS" "$MAIN_EXEC_PATH"
+    else
+        codesign --force --sign - --timestamp=none \
+            --entitlements "$ENTITLEMENTS" "$MAIN_EXEC_PATH"
     fi
-    codesign --force --sign - --timestamp=none --entitlements "$ENTITLEMENTS" "$app"
-    echo "codesign ad-hoc fakesign done"
+    echo "main executable signed with entitlements: $ENTITLEMENTS"
 }
 
-case "$SIGN_TOOL" in
-    none)
-        echo "SIGN_TOOL=none, skipped (recommended)"
-        ;;
-    ldid)
-        command -v ldid >/dev/null 2>&1 || die "ldid not found: brew install ldid, or use SIGN_TOOL=codesign"
-        sign_with_ldid
-        ;;
-    codesign)
-        sign_with_codesign
-        ;;
-    auto)
-        if command -v ldid >/dev/null 2>&1; then
-            sign_with_ldid
-        else
-            echo "ldid missing, falling back to codesign ad-hoc"
-            sign_with_codesign
-        fi
-        ;;
-    *) die "unknown SIGN_TOOL=$SIGN_TOOL (auto|ldid|codesign|none)" ;;
-esac
+pick_tool() {
+    case "$SIGN_TOOL" in
+        none) echo none ;;
+        ldid) echo ldid ;;
+        codesign) echo codesign ;;
+        auto)
+            if command -v ldid >/dev/null 2>&1; then echo ldid; else echo codesign; fi
+            ;;
+        *) die "unknown SIGN_TOOL=$SIGN_TOOL (auto|ldid|codesign|none)" ;;
+    esac
+}
+
+TOOL="$(pick_tool)"
+if [ "$TOOL" = "none" ]; then
+    # Kept as an escape hatch only. On iOS 16+ this produces an app that is
+    # killed at launch because TrollStore adds get-task-allow.
+    echo "WARNING: SIGN_TOOL=none - app will likely crash on iOS 16+ (see TROLLSTORE.md)"
+else
+    command -v "$TOOL" >/dev/null 2>&1 || die "$TOOL not found (brew install ldid)"
+    sign_nested_macho "$TOOL"
+    sign_main_with_entitlements "$TOOL"
+fi
 
 # ---------------------------- 6. zip .tipa -----------------------------------
 log "[6/6] Package .tipa"
