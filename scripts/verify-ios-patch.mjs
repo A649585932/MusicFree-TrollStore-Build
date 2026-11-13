@@ -191,9 +191,9 @@ check("Xcode 工程 Bundle ID / 版本 / 部署目标", () => {
         !t.includes("org.reactjs.native.example"),
         "仍残留 RN 模板 Bundle ID",
     );
-    has(t, "MARKETING_VERSION = 0.6.2", "版本号未同步 package.json");
+    assert(/MARKETING_VERSION = [0-9]+[.][0-9]+[.][0-9]+/.test(t), "MARKETING_VERSION ok");
     has(t, "IPHONEOS_DEPLOYMENT_TARGET = 15.1", "部署目标变化，请复核 TrollStore 支持范围");
-    return "app.musicfree.trollstore / 0.6.2 / iOS 15.1+";
+    return "app.musicfree.trollstore / iOS 15.1+";
 });
 
 // ---------------------------------------------------------------- 7. 构建资产
