@@ -71,13 +71,24 @@ jobs:
           key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock', 'package-lock.json') }}
           restore-keys: ${{ runner.os }}-pods-
 
-      - name: Generate AppIcon set
+      - name: Ensure AppIcon set
         run: |
-          # 上游 AppIcon.appiconset 是空壳（9 个槽位没有 filename），
-          # 不生成就会得到没有图标的 App。图标源用 src/assets/imgs/logo.png。
-          python3 -m pip install --quiet Pillow
-          python3 scripts/gen_ios_icons.py
-          ls -1 ios/MusicFree/Images.xcassets/AppIcon.appiconset | head -25
+          # 图标已随仓库提交（18 张全尺寸）。只做完整性校验；缺了才现场生成。
+          # macOS runner 的 python3 是 externally-managed，直接 pip install 会报
+          # error: externally-managed-environment，所以需要时走 venv。
+          ICON_DIR=ios/MusicFree/Images.xcassets/AppIcon.appiconset
+          COUNT=$(ls -1 "$ICON_DIR"/*.png 2>/dev/null | wc -l | tr -d ' ')
+          echo "existing icon png count: $COUNT"
+          if [ "$COUNT" -lt 9 ]; then
+            echo "::warning::$COUNT icons present, regenerating from logo.png"
+            python3 -m venv .iconvenv
+            ./.iconvenv/bin/python -m pip install --quiet --upgrade pip
+            ./.iconvenv/bin/python -m pip install --quiet Pillow
+            ./.iconvenv/bin/python scripts/gen_ios_icons.py
+          fi
+          ls -1 "$ICON_DIR" | head -25
+          test -f "$ICON_DIR/Contents.json"
+          test -f "$ICON_DIR/icon-ios-marketing-1024x1024@1x.png"
 
       - name: Static self-check (iOS shims / plist / project)
         run: |
