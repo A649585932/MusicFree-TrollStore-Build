@@ -5,7 +5,6 @@ import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import Clipboard from "@react-native-clipboard/clipboard";
 
-import NoPlugin from "@/components/base/noPlugin";
 import { showDialog } from "@/components/dialogs/useDialog";
 import globalStyle from "@/constants/globalStyle";
 import PluginManager from "@/core/pluginManager";
@@ -15,6 +14,7 @@ import PanelBase from "../base/panelBase";
 import PanelHeader from "../base/panelHeader";
 import { showPanel } from "../usePanel";
 import { useI18N } from "@/core/i18n";
+import ThemeText from "@/components/base/themeText";
 import {
     PLATFORM_LABEL,
     parseMultipleSheetLinks,
@@ -40,23 +40,24 @@ export default function ImportMusicSheet() {
     const { t } = useI18N();
     const safeAreaInsets = useSafeAreaInsets();
 
-    // 打开面板就尝试读剪贴板，识别到 QQ/网易云链接就直接提示
     const [clipLinks, setClipLinks] = useState<IParsedSheetLink[]>([]);
+    const [clipText, setClipText] = useState("");
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const text = await Clipboard.getString();
+                const text = (await Clipboard.getString()) || "";
                 if (cancelled || !text) {
                     return;
                 }
+                setClipText(text);
                 const parsed = parseMultipleSheetLinks(text);
-                if (!cancelled && parsed.length) {
+                if (parsed.length) {
                     setClipLinks(parsed);
                 }
             } catch {
-                // 剪贴板不可用就静默跳过
+                // 剪贴板不可用就跳过
             }
         })();
         return () => {
@@ -64,17 +65,12 @@ export default function ImportMusicSheet() {
         };
     }, []);
 
-    /**
-     * 统一导入流程：解析分享文本 → 调插件 → 成功后确认加入歌单
-     */
-    const runImport = async (
-        plugin: (typeof validPlugins)[number],
-        text: string,
-        closePanel: () => void,
-    ) => {
+    /** 统一导入流程：解析 → 调插件 → 成功后确认加入歌单 */
+    const runImport = async (plugin: any, text: string, closePanel: () => void) => {
         const shareLinks = parseMultipleSheetLinks(text);
         if (!shareLinks.length) {
-            Toast.warn(t("panel.importMusicSheet.invalidLink"));
+            // 剪贴板里可能是插件订阅、单曲链接等，给出更精确的提示
+            Toast.warn("没有识别到歌单链接，请粘贴 QQ音乐/网易云 的分享链接");
             return;
         }
 
@@ -82,6 +78,10 @@ export default function ImportMusicSheet() {
         Toast.success(t("panel.importMusicSheet.importing"));
 
         for (const link of shareLinks) {
+            if (!plugin) {
+                Toast.warn("还没有可用音源插件，请先在「插件管理」里订阅");
+                return;
+            }
             const candidates = pickPluginsForSheet(link);
             const ordered = [
                 plugin,
@@ -126,14 +126,11 @@ export default function ImportMusicSheet() {
         }
     };
 
-    const openInput = (
-        plugin: (typeof validPlugins)[number],
-        prefill?: string,
-    ) => {
+    const openInput = (plugin: any, prefill?: string) => {
         showPanel("SimpleInput", {
             title: t("panel.importMusicSheet.title"),
-            placeholder: t("panel.importMusicSheet.placeholder"),
-            hints: plugin.instance.hints?.importMusicSheet,
+            placeholder: "粘贴歌单分享链接，如 https://music.163.com/playlist?id=xxx",
+            hints: plugin?.instance?.hints?.importMusicSheet,
             maxLength: 2000,
             defaultValue: prefill ?? "",
             async onOk(text, closePanel) {
@@ -142,34 +139,48 @@ export default function ImportMusicSheet() {
         });
     };
 
+    const firstPlugin = validPlugins[0] ?? null;
+
     return (
         <PanelBase
-            height={vmax(60)}
+            height={vmax(66)}
             renderBody={() => (
                 <>
                     <PanelHeader hideButtons title={t("panel.importMusicSheet.title")} />
+
                     <View style={{ paddingHorizontal: rpx(24) }}>
-                        <View style={{ opacity: 0.6, paddingVertical: rpx(12) }}>
-                            支持直接粘贴 QQ音乐 / 网易云音乐 的分享链接或分享文案
-                        </View>
+                        <ThemeText
+                            fontColor="textSecondary"
+                            fontSize="subTitle"
+                            style={{ paddingVertical: rpx(10) }}>
+                            支持 QQ音乐 / 网易云音乐 的歌单分享链接或分享文案
+                        </ThemeText>
                     </View>
 
-                    {/* 剪贴板里如果有可识别的歌单链接，优先展示一键导入 */}
-                    {clipLinks.length && validPlugins.length ? (
-                        <View style={{ paddingHorizontal: rpx(24), paddingBottom: rpx(12) }}>
+                    {/* 从剪贴板一键导入：最显眼的位置 */}
+                    {clipLinks.length ? (
+                        <View
+                            style={{
+                                paddingHorizontal: rpx(24),
+                                paddingBottom: rpx(8),
+                            }}>
+                            <ThemeText
+                                fontSize="subTitle"
+                                style={{ paddingVertical: rpx(8) }}>
+                                检测到剪贴板内容：
+                            </ThemeText>
                             {clipLinks.map(link => (
                                 <ListItem
                                     key={link.normalizedUrl}
                                     withHorizontalPadding
                                     onPress={() => {
-                                        // 预填原始分享文本，用户可直接确认
                                         openInput(
-                                            validPlugins[0],
+                                            firstPlugin,
                                             link.rawText || link.normalizedUrl,
                                         );
                                     }}>
                                     <ListItem.Content
-                                        title={`从剪贴板导入 ${PLATFORM_LABEL[link.platform]}${
+                                        title={`导入 ${PLATFORM_LABEL[link.platform]}${
                                             link.id ? `（${link.id}）` : ""
                                         }`}
                                     />
@@ -178,8 +189,44 @@ export default function ImportMusicSheet() {
                         </View>
                     ) : null}
 
+                    {/* 手动粘贴入口：始终存在，不依赖插件是否支持 importMusicSheet */}
+                    <ListItem
+                        withHorizontalPadding
+                        onPress={() => {
+                            if (!firstPlugin) {
+                                Toast.warn(
+                                    "还没有音源插件，请先去「设置 → 插件管理」订阅",
+                                );
+                                return;
+                            }
+                            openInput(firstPlugin, clipText || undefined);
+                        }}>
+                        <ListItem.Content
+                            title="手动粘贴歌单链接"
+                            description={
+                                validPlugins.length
+                                    ? `将使用「${firstPlugin?.name}」解析`
+                                    : "尚无音源插件，请先订阅"
+                            }
+                        />
+                    </ListItem>
+
+                    <View
+                        style={{
+                            height: 1,
+                            backgroundColor: "#8884",
+                            marginVertical: rpx(8),
+                        }}
+                    />
+
                     {validPlugins.length ? (
                         <View style={globalStyle.fwflex1}>
+                            <ThemeText
+                                fontColor="textSecondary"
+                                fontSize="subTitle"
+                                style={{ paddingHorizontal: rpx(24), paddingVertical: rpx(8) }}>
+                                或选择指定插件解析：
+                            </ThemeText>
                             <FlatList
                                 data={validPlugins}
                                 keyExtractor={plugin => plugin.hash}
@@ -188,16 +235,25 @@ export default function ImportMusicSheet() {
                                     <ListItem
                                         withHorizontalPadding
                                         key={`${plugin.hash}`}
-                                        onPress={() => openInput(plugin)}>
+                                        onPress={() =>
+                                            openInput(plugin, clipText || undefined)
+                                        }>
                                         <ListItem.Content title={plugin.name} />
                                     </ListItem>
                                 )}
                             />
                         </View>
                     ) : (
-                        <NoPlugin
-                            notSupportType={t("panel.importMusicSheet.title")}
-                        />
+                        <View
+                            style={{
+                                paddingHorizontal: rpx(24),
+                                paddingTop: rpx(16),
+                            }}>
+                            <ThemeText fontColor="textSecondary">
+                                当前没有支持「导入歌单」的插件。{"\n"}
+                                请到「设置 → 插件管理 → 订阅插件」添加音源后重试。
+                            </ThemeText>
+                        </View>
                     )}
                 </>
             )}
