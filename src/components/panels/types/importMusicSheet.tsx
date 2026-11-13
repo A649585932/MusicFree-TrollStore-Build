@@ -18,8 +18,10 @@ import ThemeText from "@/components/base/themeText";
 import {
     PLATFORM_LABEL,
     parseMultipleSheetLinks,
+    resolveSheetShareLink,
     type IParsedSheetLink,
 } from "@/utils/parseSheetLink";
+import axios from "axios";
 
 /** 按平台优先挑选插件：QQ 歌单优先 QQ 系插件，网易云优先网易云系插件 */
 function pickPluginsForSheet(link: IParsedSheetLink) {
@@ -67,7 +69,30 @@ export default function ImportMusicSheet() {
 
     /** 统一导入流程：解析 → 调插件 → 成功后确认加入歌单 */
     const runImport = async (plugin: any, text: string, closePanel: () => void) => {
-        const shareLinks = parseMultipleSheetLinks(text);
+        // 先用离线解析拿到列表，再对每条做异步解析（短链会跟随跳转）
+        const quick = parseMultipleSheetLinks(text);
+        const follow = async (u: string): Promise<string | null> => {
+            try {
+                const resp = await axios.get(u, {
+                    timeout: 12000,
+                    maxRedirects: 8,
+                    validateStatus: () => true,
+                    headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X)" },
+                });
+                // axios 在 RN 里拿到的是最终 URL（若有 request.responseURL）
+                const finalUrl =
+                    (resp.request as any)?.responseURL ||
+                    (resp as any)?.request?.responseURL;
+                return typeof finalUrl === "string" ? finalUrl : null;
+            } catch {
+                return null;
+            }
+        };
+        const shareLinks: IParsedSheetLink[] = [];
+        for (const q of quick) {
+            const r = await resolveSheetShareLink(q.rawUrl, follow);
+            shareLinks.push(r ?? q);
+        }
         if (!shareLinks.length) {
             // 剪贴板里可能是插件订阅、单曲链接等，给出更精确的提示
             Toast.warn("没有识别到歌单链接，请粘贴 QQ音乐/网易云 的分享链接");
