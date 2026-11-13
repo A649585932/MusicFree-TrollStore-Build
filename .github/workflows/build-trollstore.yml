@@ -147,7 +147,7 @@ jobs:
             echo "## MusicFree TrollStore 构建结果"
             echo ""
             echo "- 产物：\`build/MusicFree.trollstore.tipa\`"
-            echo "- Bundle ID：\`app.musicfree.trollstore\`"
+            echo "- Bundle ID：\`app.musicfree.ios\`"
             echo "- New Architecture：\`${NEW_ARCH:-0}\`"
             echo "- 签名方式：\`${SIGN_TOOL:-auto}\`（免 Apple 证书，TrollStore 安装时伪签）"
             echo ""
