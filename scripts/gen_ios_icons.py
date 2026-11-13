@@ -1,20 +1,22 @@
-"""Generate a full-bleed AppIcon.appiconset from a single source image.
+"""Generate a full AppIcon.appiconset with STANDARD iOS filenames.
 
-Why this exists
----------------
-The upstream repo ships an EMPTY AppIcon.appiconset (9 slots, no filenames),
-so Xcode emitted no usable icon and iOS showed a blank tile.
+关键修正
+--------
+之前用 `icon-iphone-60x60@3x.png` 这类文件名，导致 Xcode 把**文件名**注册成
+Assets.car 里的资产名（实测 Assets.car 里出现的是 icon-iphone-60x60@3x.png），
+而 Info.plist 的 CFBundleIconName / CFBundleIconFiles 指向的是 `AppIcon` /
+`AppIcon60x60`，两边对不上 → 桌面图标能显示（系统 fallback），
+但**多任务卡片读不到图标**。
 
-Icon rules that matter here
----------------------------
-* iOS app icons must be fully OPAQUE. Any alpha is ignored and can render as a
-  black plate, so every output is converted to RGB.
-* The system applies the rounded-corner mask itself. Do NOT bake in rounded
-  corners or a visible frame: after masking, any inner margin reads as a
-  "white/odd border" around the artwork.
-* Therefore the artwork is scaled to FULL BLEED (100% of the canvas), not
-  inset. The mark is allowed to be cropped slightly at the extreme edges,
-  which is what real app icons do.
+标准做法（Apple 官方模板）是：
+    AppIcon20x20@2x.png
+    AppIcon20x20@3x.png
+    AppIcon29x29@2x.png
+    ...
+    AppIcon60x60@2x.png
+    AppIcon60x60@3x.png
+    AppIcon1024x1024@1x.png
+这样 Assets.car 里注册的就是 AppIcon 这一组，CFBundleIconName=AppIcon 才能索引到。
 
 Usage: python scripts/gen_ios_icons.py
 """
@@ -28,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src", "assets", "imgs", "logo.png")
 OUT_DIR = os.path.join(ROOT, "ios", "MusicFree", "Images.xcassets", "AppIcon.appiconset")
 
+# (idiom, size, scale)
 MATRIX = [
     ("iphone", 20, 2), ("iphone", 20, 3),
     ("iphone", 29, 2), ("iphone", 29, 3),
@@ -42,9 +45,6 @@ MATRIX = [
 ]
 
 FALLBACK_BG = (39, 40, 44)
-
-# 1.0 = artwork touches every edge (true full bleed, like stock iOS icons).
-# Slight overscan hides antialiasing seams after the rounded mask is applied.
 BLEED = 1.00
 
 
@@ -62,7 +62,6 @@ def dominant_color(img: Image.Image):
 
 
 def build_master(src: Image.Image) -> Image.Image:
-    """Opaque 1024x1024 master whose artwork bleeds to all four edges."""
     rgba = src.convert("RGBA")
     bg = dominant_color(rgba)
 
@@ -70,8 +69,6 @@ def build_master(src: Image.Image) -> Image.Image:
     if bbox:
         rgba = rgba.crop(bbox)
 
-    # The logo is a bright cat mark on a dark plate. Keep only the bright mark,
-    # so the icon is "white cat on solid brand background" at full bleed.
     w, h = rgba.size
     px = rgba.load()
     bright = []
@@ -92,7 +89,6 @@ def build_master(src: Image.Image) -> Image.Image:
     else:
         art = rgba
 
-    # Full bleed: scale the mark so it covers the whole canvas.
     target = int(1024 * BLEED)
     scale = target / float(max(art.width, art.height))
     art = art.resize(
@@ -103,10 +99,15 @@ def build_master(src: Image.Image) -> Image.Image:
     layer = Image.new("RGB", art.size, bg)
     layer.paste(art, (0, 0), art)
 
-    # Center; with BLEED > 1 the overflow is cropped by the canvas bounds.
     off = ((1024 - layer.width) // 2, (1024 - layer.height) // 2)
     canvas.paste(layer, off)
     return canvas
+
+
+def standard_name(size: float, scale: int) -> str:
+    """生成 Apple 标准命名，如 AppIcon60x60@2x.png"""
+    size_str = f"{size:g}"  # 83.5 -> "83.5", 60 -> "60"
+    return f"AppIcon{size_str}x{size_str}@{scale}x.png"
 
 
 def main() -> int:
@@ -115,14 +116,20 @@ def main() -> int:
         return 1
     os.makedirs(OUT_DIR, exist_ok=True)
 
+    # 清理旧的非标准文件
+    for f in os.listdir(OUT_DIR):
+        if f.startswith("icon-") and f.endswith(".png"):
+            os.remove(os.path.join(OUT_DIR, f))
+            print(f"  removed old: {f}")
+
     src = Image.open(SRC)
     master = build_master(src)
-    print(f"master 1024x1024 opaque full-bleed, bg={dominant_color(src.convert('RGBA'))}")
+    print(f"master 1024x1024 opaque, bg={dominant_color(src.convert('RGBA'))}")
 
     images = []
     for idiom, size, scale in MATRIX:
         px = int(round(size * scale))
-        name = f"icon-{idiom}-{size}x{size}@{scale}x.png"
+        name = standard_name(size, scale)
         master.resize((px, px), Image.LANCZOS).convert("RGB").save(
             os.path.join(OUT_DIR, name), "PNG"
         )
@@ -130,16 +137,16 @@ def main() -> int:
             "filename": name,
             "idiom": idiom,
             "scale": f"{scale}x",
-            "size": f"{size}x{size}",
+            "size": f"{size:g}x{size:g}",
         })
-        print(f"  {name:44s} {px}x{px}")
+        print(f"  {name:32s} {px}x{px}")
 
     contents = {"images": images, "info": {"author": "xcode", "version": 1}}
     with open(os.path.join(OUT_DIR, "Contents.json"), "w", encoding="utf-8") as f:
         json.dump(contents, f, indent=2)
         f.write("\n")
 
-    print(f"\ngenerated {len(images)} icons in {OUT_DIR}")
+    print(f"\ngenerated {len(images)} icons (standard naming) in {OUT_DIR}")
     return 0
 
 
