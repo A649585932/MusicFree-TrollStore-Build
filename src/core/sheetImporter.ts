@@ -10,6 +10,8 @@
  * 因此这里直接调平台接口，把结果转换成 MusicFree 的 IMusicItem 结构，
  * 插件只作为兜底（万一哪天插件修好了）。
  */
+import { followRedirects, isShortLink as _isShortLink } from "../utils/resolveShortLink";
+
 
 export type SheetSource = "netease" | "qq" | "unknown";
 
@@ -310,66 +312,27 @@ export async function fetchQQSheet(sheetId: string): Promise<IImportResult> {
  * @param preferred 当输入是纯数字、无法判断平台时的偏好
  */
 /**
- * 跟随短链跳转（纯 fetch 实现，RN 兼容）。
+ * 短链跟随跳转。
  *
- * 为什么不用 axios：
- *   React Native 的 XMLHttpRequest 不会暴露 responseURL，
- *   而 axios 在 RN 上拿不到 3xx 的 location 头。
- *   这里用 fetch + redirect:"manual" 自己读 location。
+ * 复用 utils/resolveShortLink 的实现（XMLHttpRequest 版），
+ * 因为 React Native 里只有 XHR 能可靠读到 3xx 的 location 头：
+ *   - axios + maxRedirects:0 → 拿不到 location
+ *   - fetch + redirect:"manual" → location 被 CORS 过滤
+ *   - XMLHttpRequest.getAllResponseHeaders() → 可行
+ *
+ * 本地测试（Node）会自动回退到 fetch，两边都能跑。
  */
-async function followShortLink(
-    url: string,
-    maxHops = 8,
-): Promise<string | null> {
-    let current = url;
-    for (let i = 0; i < maxHops; i++) {
-        try {
-            const resp = await fetch(current, {
-                method: "GET",
-                redirect: "manual",
-                headers: {
-                    "User-Agent": UA_IOS,
-                    Accept: "text/html,*/*",
-                },
-            });
-
-            const status = resp.status;
-            const loc = resp.headers.get("location");
-
-            if (status >= 300 && status < 400 && loc) {
-                // 相对路径转绝对
-                if (/^https?:\/\//i.test(loc)) {
-                    current = loc;
-                } else if (loc.startsWith("//")) {
-                    current = "https:" + loc;
-                } else if (loc.startsWith("/")) {
-                    const u = new URL(current);
-                    current = `${u.protocol}//${u.host}${loc}`;
-                } else {
-                    const u = new URL(current);
-                    const dir = u.pathname.replace(/\/[^/]*$/, "/");
-                    current = `${u.protocol}//${u.host}${dir}${loc}`;
-                }
-                continue;
-            }
-
-            // 2xx 或没有 location：认为到终点了
-            return current;
-        } catch {
-            return current;
-        }
+async function followShortLink(url: string): Promise<string | null> {
+    try {
+        return await followRedirects(url);
+    } catch {
+        return url;
     }
-    return current;
 }
 
 /** 短链特征判定 */
 function looksLikeShortLink(url: string): boolean {
-    return (
-        /c\d*\.y\.qq\.com\/base\/fcgi-bin\/u/i.test(url) ||
-        /u\?__=/i.test(url) ||
-        /163cn\.tv/i.test(url) ||
-        /url\.cn\//i.test(url)
-    );
+    return _isShortLink(url);
 }
 
 export async function importSheetDirect(
