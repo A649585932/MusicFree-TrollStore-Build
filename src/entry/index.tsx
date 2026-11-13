@@ -13,7 +13,7 @@ import globalStyle from "@/constants/globalStyle";
 import Theme from "@/core/theme";
 import { BootstrapComponent } from "./bootstrap/BootstrapComponent";
 import { ToastBaseComponent } from "@/components/base/toast";
-import { StatusBar } from "react-native";
+import { Platform, StatusBar } from "react-native";
 import { ReduceMotion, ReducedMotionConfig } from "react-native-reanimated";
 import { routes } from "@/core/router/routes.tsx";
 import ErrorBoundary from "@/components/errorBoundary";
@@ -22,8 +22,16 @@ import ErrorBoundary from "@/components/errorBoundary";
  * 字体颜色
  */
 
-StatusBar.setBackgroundColor("transparent");
-StatusBar.setTranslucent(true);
+/**
+ * StatusBar.setBackgroundColor / setTranslucent 只存在于 Android 实现，
+ * iOS 的 StatusBar 模块里没有这两个方法。原代码在模块顶层同步调用，
+ * iOS 上会抛 TypeError: StatusBar.setBackgroundColor is not a function，
+ * 导致 JS Bundle 初始化失败、启动白屏/秒退。必须按平台守卫。
+ */
+if (Platform.OS === "android") {
+    StatusBar.setBackgroundColor("transparent");
+    StatusBar.setTranslucent(true);
+}
 
 bootstrap();
 const Stack = createNativeStackNavigator<any>();
