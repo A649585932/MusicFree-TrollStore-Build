@@ -32,6 +32,8 @@ interface IPersistStatus {
     "app.language": string;
     /** 上次更新插件的时间 */
     "app.pluginUpdateTime": number;
+    /** 内置音源订阅是否已初始化（避免每次启动重复安装） */
+    "app.builtinSubscribeDone": boolean;
     /** 缓存的定时关闭自定义时间（分钟） */
     "app.scheduleCloseTime": number;
     /** 歌词-是否启用翻译 */
