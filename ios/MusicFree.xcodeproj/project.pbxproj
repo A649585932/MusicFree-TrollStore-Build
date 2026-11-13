@@ -442,7 +442,7 @@ A1B2C3D4E5F60718293A0002 /* SplashScreen.storyboard in Resources */,
 					"-lc++",
 					"$(inherited)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.trollstore";
+				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicFree.app/MusicFree";
 				SWIFT_VERSION = 5.0;
@@ -467,7 +467,7 @@ A1B2C3D4E5F60718293A0002 /* SplashScreen.storyboard in Resources */,
 					"-lc++",
 					"$(inherited)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.trollstore";
+				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicFree.app/MusicFree";
 				SWIFT_VERSION = 5.0;
@@ -494,7 +494,7 @@ A1B2C3D4E5F60718293A0002 /* SplashScreen.storyboard in Resources */,
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.trollstore";
+				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.ios";
 				PRODUCT_NAME = MusicFree;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -521,7 +521,7 @@ A1B2C3D4E5F60718293A0002 /* SplashScreen.storyboard in Resources */,
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.trollstore";
+				PRODUCT_BUNDLE_IDENTIFIER = "app.musicfree.ios";
 				PRODUCT_NAME = MusicFree;
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
