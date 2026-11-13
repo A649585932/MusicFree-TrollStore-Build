@@ -19,6 +19,8 @@ interface ISimpleInputProps {
     maxLength?: number;
     placeholder?: string;
     autoFocus?: boolean;
+    /** ��ʼ�ı�������Ӽ�����Ԥ� */
+    defaultValue?: string;
 }
 
 export default function SimpleInput(props: ISimpleInputProps) {
@@ -31,9 +33,10 @@ export default function SimpleInput(props: ISimpleInputProps) {
         hints,
         title,
         autoFocus = true,
+        defaultValue = "",
     } = props;
 
-    const [input, setInput] = useState("");
+    const [input, setInput] = useState(defaultValue);
     const colors = useColors();
 
     return (
@@ -82,7 +85,7 @@ export default function SimpleInput(props: ISimpleInputProps) {
                                         style={style.hintLine}
                                         fontSize="subTitle"
                                         fontColor="textSecondary">
-                                        ￮ {_}
+                                        �?{_}
                                     </ThemeText>
                                 ))}
                             </View>
