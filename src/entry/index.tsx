@@ -51,21 +51,23 @@ export default function Pages() {
                             initialRouteName={routes[0].path}
                             screenOptions={{
                                 headerShown: false,
-                                // iOS 默认的原生 push 动画比固定 slide_from_right 更跟手，
-                                // 且 animationDuration 在 iOS 原生栈上会被忽略，
-                                // 之前写死 100ms 反而让 Android 也显得生硬。
+                                // iOS 用系统原生 push 动画（跟手、无残影）
                                 animation:
                                     Platform.OS === "ios"
                                         ? "default"
                                         : "slide_from_right",
                                 animationDuration:
                                     Platform.OS === "android" ? 180 : undefined,
-                                // 跟手返回手势（iOS 边缘滑返）
+                                // 跟手返回手势
                                 gestureEnabled: Platform.OS === "ios",
                                 fullScreenGestureEnabled:
                                     Platform.OS === "ios",
+                                // 关键：必须给不透明背景，否则下层页面会透出来，
+                                // 视觉上就是"主界面影像残留"。
+                                // 用页面自己的背景色（pageBackground 会再叠一层），
+                                // 这里给主题底色兜底。
                                 contentStyle: {
-                                    backgroundColor: "transparent",
+                                    backgroundColor: theme.colors.backdrop,
                                 },
                             }}>
                             {routes.map(route => (
