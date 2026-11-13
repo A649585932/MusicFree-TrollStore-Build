@@ -80,6 +80,9 @@ async function bootstrapImpl() {
     }
     logger.mark("权限检查完成");
 
+    // 1.5 覆盖升级时清理旧标记（必须在初始化插件之前）
+    await migrateOnUpgrade();
+
     // 2. 数据初始化
     /** 初始化路径 */
     await setupFolder();
@@ -103,10 +106,24 @@ async function bootstrapImpl() {
     trace("配置初始化完成");
     logger.mark("配置初始化完成");
 
-    // 加载插件
-    await PluginManager.setup();
-    logger.mark("插件初始化完成");
-    trace("插件初始化完成");
+    // 加载插件（带超时保护：插件多时 setup 会逐个读文件+执行 js，
+    // 第二次启动因为已有插件而变慢。超过 3 秒就先放行，后台继续加载。）
+    await Promise.race([
+        PluginManager.setup()
+            .then(() => {
+                logger.mark("插件初始化完成");
+                trace("插件初始化完成");
+            })
+            .catch(e => {
+                errorLog("插件初始化失败", e);
+            }),
+        new Promise<void>(resolve =>
+            setTimeout(() => {
+                trace("插件初始化超时，先放行界面");
+                resolve();
+            }, 3000),
+        ),
+    ]);
 
     // 内置音源：后台增量补齐，不阻塞启动
     installBuiltinPluginsIfNeeded().catch(e => {
@@ -142,6 +159,38 @@ async function bootstrapImpl() {
     ErrorUtils.setGlobalHandler(error => {
         errorLog("未捕获的错误", error);
     });
+}
+
+/**
+ * 覆盖升级时清理旧状态。
+ *
+ * TrollStore 覆盖安装会保留 App 的数据容器，导致：
+ *   - 旧的 builtinSubscribeDone 标记让「自动补插件」永远跳过；
+ *   - 旧 MMKV 里的插件缓存让新插件逻辑不生效。
+ *
+ * 这里用 CFBundleVersion 作为版本指纹：构建号变化 = 新版本，
+ * 清掉与「一次性初始化」相关的标记，让新逻辑从头跑一遍。
+ * 用户数据（歌单、配置、播放列表）一律不动。
+ */
+async function migrateOnUpgrade() {
+    try {
+        const DeviceInfo = require("react-native-device-info").default;
+        const currentBuild = String(DeviceInfo.getBuildNumber?.() ?? "");
+        if (!currentBuild) {
+            return;
+        }
+        const lastBuild = PersistStatus.get("app.lastBuildVersion");
+        if (lastBuild === currentBuild) {
+            return;
+        }
+
+        // 首次运行（无记录）也走这里：清掉可能残留的旧标记
+        trace(`版本变更 ${lastBuild ?? "<首次>"} -> ${currentBuild}，重置初始化标记`);
+        PersistStatus.set("app.builtinSubscribeDone", undefined as any);
+        PersistStatus.set("app.lastBuildVersion", currentBuild);
+    } catch (e) {
+        errorLog("版本迁移失败", e);
+    }
 }
 
 /** 初始化 */
