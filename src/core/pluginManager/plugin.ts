@@ -186,12 +186,57 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
         const result =
             (await this.plugin.instance.search(query, page, type)) ?? {};
         if (Array.isArray(result.data)) {
-            result.data.forEach(_ => {
+            /*
+             * 过滤「片段版单曲」。
+             *
+             * 实测（用户反馈 30 秒问题追到的真根因之一）：
+             *   酷狗搜《起风了》第一条 = "起风了 (间奏0.8X) (32秒片段)" 31s
+             *   酷狗搜《孤勇者》第一条 = "孤勇者 (42秒片段)"              42s
+             *   酷我搜《反方向的钟》第一条 = 42s 短版
+             *   酷我搜《孤勇者》第一条 = "热血epic版" 48s
+             *   完整版都在第 2~3 条（256s~313s）。
+             *
+             * 这些是平台真实存在的「片段单曲」，不是取链降级。
+             * 用户点搜索结果第一条就会播到 30 秒片段。
+             *
+             * 只对等价于移动端的 4 个平台做过滤（QQ/网易云/酷我/酷狗），
+             * 咪咕、汽水保持原样。
+             */
+            const FILTER_CLIP_PLATFORMS = ["qq", "netease", "kuwo", "kugou"];
+            const shouldFilter = FILTER_CLIP_PLATFORMS.includes(
+                String(this.plugin.name ?? "").toLowerCase(),
+            );
+            let data = result.data;
+            if (shouldFilter && type === "music") {
+                const isClip = (item: any): boolean => {
+                    const title = String(item?.title ?? item?.name ?? "");
+                    // 标题里明确标了片段/试听/秒数
+                    if (
+                        /片段|试听|preview|\d+\s*秒|间奏|0\.\d+X|epic版|短视频版/i.test(
+                            title,
+                        )
+                    ) {
+                        return true;
+                    }
+                    // 时长明显过短（<60 秒）
+                    const dur = Number(item?.duration);
+                    if (Number.isFinite(dur) && dur > 0 && dur < 60) {
+                        return true;
+                    }
+                    return false;
+                };
+                const filtered = data.filter(item => !isClip(item));
+                // 全被过滤光时保留原结果（避免搜不到歌）
+                if (filtered.length > 0) {
+                    data = filtered;
+                }
+            }
+            data.forEach(_ => {
                 resetMediaItem(_, this.plugin.name);
             });
             return {
                 isEnd: result.isEnd ?? true,
-                data: result.data,
+                data,
             };
         }
         return {
