@@ -79,6 +79,77 @@ export default function ImportMusicSheet() {
 
     const plugins = PluginManager.getSortedPlugins();
 
+    /**
+     * 把「平台标识」映射成「插件名」。
+     *
+     * 为什么必须这么做：
+     *   PluginManager.getByName() 内部是
+     *       this.getPlugins().find(_ => _.name === name)
+     *   ——按插件名**精确匹配**。
+     *   而插件的 name 是中文（如「QQ音乐」），
+     *   如果我们把 platform 写成 "qq"，播放时 getByName("qq") 返回 undefined，
+     *   拿不到 getMediaSource → 无 url → 播放器疯狂跳下一首。
+     *
+     * 所以导入时必须把 platform 设成插件的真实 name。
+     */
+    const resolvePluginName = (
+        source: SheetSource,
+        preferred?: any,
+    ): string => {
+        // 1) 用户点选的那个插件，直接用它的名字
+        if (preferred?.name) {
+            return preferred.name;
+        }
+
+        const kw =
+            source === "qq"
+                ? ["qq"]
+                : source === "netease"
+                  ? ["网易", "netease", "163"]
+                  : [];
+
+        // 2) srcUrl 文件名匹配：qq-source.plugin.v1.9.26.js → qq
+        if (kw.length) {
+            for (const p of plugins) {
+                const srcUrl = `${(p as any).instance?.srcUrl ?? ""}`.toLowerCase();
+                const file = srcUrl.split("/").pop() ?? "";
+                for (const k of kw) {
+                    if (file.includes(k)) {
+                        return p.name;
+                    }
+                }
+            }
+
+            // 3) 插件名包含匹配（「QQ音乐」含 "qq"）
+            for (const p of plugins) {
+                const name = `${p.name ?? ""}`.toLowerCase();
+                for (const k of kw) {
+                    if (name.includes(k)) {
+                        return p.name;
+                    }
+                }
+            }
+
+            // 4) instance.platform 字段匹配
+            for (const p of plugins) {
+                const plat = `${(p as any).instance?.platform ?? ""}`.toLowerCase();
+                for (const k of kw) {
+                    if (plat === k || plat.includes(k)) {
+                        return p.name;
+                    }
+                }
+            }
+        }
+
+        // 5) 兜底：第一个可用插件（保证至少能播放）
+        if (plugins.length) {
+            return plugins[0].name;
+        }
+
+        // 完全没有插件，返回平台标识（会播放失败，但至少不崩）
+        return source;
+    };
+
     // 打开面板时读剪贴板，识别平台
     useEffect(() => {
         let cancelled = false;
@@ -109,7 +180,11 @@ export default function ImportMusicSheet() {
      * 核心导入：优先用 App 自实现的接口（插件已失效），
      * 失败再退回插件。
      */
-    const doImport = async (text: string, preferred?: SheetSource) => {
+    const doImport = async (
+        text: string,
+        preferred?: SheetSource,
+        preferredPlugin?: any,
+    ) => {
         if (busy) {
             return;
         }
@@ -161,9 +236,18 @@ export default function ImportMusicSheet() {
                 title: t("panel.importMusicSheet.prepareImport"),
                 content: `《${result.sheetName}》共 ${result.songs.length} 首，导入到新歌单？`,
                 onOk() {
+                    /**
+                     * 关键：platform 必须是「插件名」，不是平台标识。
+                     *
+                     * PluginManager.getByName() 用 `_.name === name` 精确匹配，
+                     * 插件的 name 是中文名（如「QQ音乐」），
+                     * 所以这里要把 platform 设成插件名，
+                     * 否则播放时找不到插件 → 拿不到 url → 无限跳下一首。
+                     */
+                    const pluginName = resolvePluginName(result!.source, preferredPlugin);
                     const items = result!.songs.map(s => ({
                         id: s.id,
-                        platform: result!.source,
+                        platform: pluginName,
                         title: s.title,
                         artist: s.artist,
                         album: s.album,
@@ -180,7 +264,7 @@ export default function ImportMusicSheet() {
         }
     };
 
-    const openInput = (prefill?: string) => {
+    const openInput = (prefill?: string, plugin?: any) => {
         showPanel("SimpleInput", {
             title: "导入歌单",
             placeholder: "粘贴 QQ音乐/网易云 歌单链接或歌单 ID",
@@ -188,7 +272,7 @@ export default function ImportMusicSheet() {
             defaultValue: prefill ?? "",
             onOk: async (text, closePanel) => {
                 closePanel();
-                await doImport(text);
+                await doImport(text, undefined, plugin);
             },
         } as any);
     };
