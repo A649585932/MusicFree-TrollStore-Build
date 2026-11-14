@@ -208,6 +208,31 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
         notUpdateCache = false,
     ): Promise<IPlugin.IMediaSourceResult | null> {
         await this.ensurePluginIsMounted();
+
+        /*
+         * padao 系插件（QQ/酷我/酷狗/咪咕/网易云/汽水）内部有
+         * 「取链链预算」：每次 getMediaSource 前必须由宿主调用
+         *   _internal.setChainDeadlineForTest(Date.now() + RESOLVE_BUDGET_MS)
+         * 否则所有第三方通道会判定「预算已耗尽」直接跳过，
+         * 表现就是「聚合取链失败：所有可用源均未取得播放链接」→
+         * 播放器拿不到 url → 疯狂跳下一首。
+         *
+         * 桌面版由它自己的插件管理器做了这件事，移动端原版没做。
+         * 这里在宿主侧补上，让插件回退路径也能正常取链。
+         */
+        try {
+            const internal = (this.plugin?.instance as any)?._internal;
+            if (internal?.setChainDeadlineForTest) {
+                const budget =
+                    typeof internal.RESOLVE_BUDGET_MS === "number"
+                        ? internal.RESOLVE_BUDGET_MS
+                        : 8000;
+                internal.setChainDeadlineForTest(Date.now() + budget + 20000);
+            }
+        } catch {
+            /* 非 padao 插件没有这个方法，忽略 */
+        }
+
         // 1. 本地搜索 其实直接读mediameta就好了
         const localPathInMediaExtra = getMediaExtraProperty(musicItem, "localPath");
         const localPath = getLocalPath(musicItem);
