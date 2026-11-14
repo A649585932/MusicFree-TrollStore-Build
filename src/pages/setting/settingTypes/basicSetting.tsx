@@ -1,6 +1,5 @@
 import ColorBlock from "@/components/base/colorBlock";
 import ListItem from "@/components/base/listItem";
-import Paragraph from "@/components/base/paragraph";
 import ThemeSwitch from "@/components/base/switch";
 import ThemeText from "@/components/base/themeText";
 import { showDialog } from "@/components/dialogs/useDialog";
@@ -14,16 +13,14 @@ import useColors from "@/hooks/useColors";
 import LyricUtil, { NativeTextAlignment } from "@/native/lyricUtil";
 import { AppConfigPropertyKey } from "@/types/core/config";
 import { clearCache, getCacheSize, sizeFormatter } from "@/utils/fileUtils";
-import { clearLog, getErrorLogContent } from "@/utils/log";
 import { qualityKeys } from "@/utils/qualities";
 import rpx from "@/utils/rpx";
 import Toast from "@/utils/toast";
-import Clipboard from "@react-native-clipboard/clipboard";
 import Slider from "@react-native-community/slider";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { SectionList, StyleSheet, TouchableOpacity, View } from "react-native";
 import { readdir } from "react-native-fs";
-import { FlatList, ScrollView } from "react-native-gesture-handler";
+import { ScrollView } from "react-native-gesture-handler";
 
 function createSwitch(
     title: string,
@@ -133,16 +130,47 @@ export default function BasicSetting() {
 
     const { t } = useI18N();
 
-    const debugEnableErrorLog = useAppConfig("debug.errorLog");
-    const debugEnableTraceLog = useAppConfig("debug.traceLog");
-    const debugEnableDevLog = useAppConfig("debug.devLog");
+    // 开发选项相关的配置读取已随 UI 一起移除
 
     const navigate = useNavigate();
 
     const [cacheSize, refreshCacheSize] = useCacheSize();
 
     const sectionListRef = useRef<SectionList | null>(null);
-    // const titleListRef = useRef<FlatList | null>(null);
+
+    /** 当前高亮的分类索引（随滚动同步） */
+    const [activeSection, setActiveSection] = useState(0);
+
+    /**
+     * 滚动时更新高亮。
+     * 用最高可见比例判断，避免快速滚动时来回跳。
+     */
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 40,
+    }).current;
+
+    const viewableItemsChanged = useRef(
+        ({ viewableItems }: { viewableItems: Array<{ section?: any }> }) => {
+            if (!viewableItems.length) {
+                return;
+            }
+            // 找到第一个可见 item 所属的 section
+            const first = viewableItems[0];
+            const sec = first?.section;
+            if (!sec) {
+                return;
+            }
+            const idx = basicOptionsRef.current.findIndex(
+                s => s.title === sec.title,
+            );
+            if (idx >= 0) {
+                setActiveSection(idx);
+            }
+        },
+    );
+
+    // basicOptions 在下方定义，用 ref 桥接避免闭包旧值
+    const basicOptionsRef = useRef<Array<{ title: string }>>([]);
 
     useEffect(() => {
         refreshCacheSize();
@@ -515,84 +543,50 @@ export default function BasicSetting() {
                 },
             ],
         },
-        {
-            title: t("basicSettings.developer"),
-            data: [
-                createSwitch(
-                    t("basicSettings.developer.errorLog"),
-                    "debug.errorLog",
-                    debugEnableErrorLog ?? false,
-                ),
-                createSwitch(
-                    t("basicSettings.developer.traceLog"),
-                    "debug.traceLog",
-                    debugEnableTraceLog ?? false,
-                ),
-                createSwitch(
-                    t("basicSettings.developer.devLog"),
-                    "debug.devLog",
-                    debugEnableDevLog ?? false,
-                ),
-                {
-                    title: t("basicSettings.developer.viewErrorLog"),
-                    right: undefined,
-                    async onPress() {
-                        // 获取日志文件夹
-                        const errorLogContent = await getErrorLogContent();
-                        showDialog("SimpleDialog", {
-                            title: t("dialog.errorLogTitle"),
-                            content: (
-                                <ScrollView>
-                                    <Paragraph>
-                                        {errorLogContent || t("dialog.errorLogNoRecord")}
-                                    </Paragraph>
-                                </ScrollView>
-                            ),
-                            cancelText: t("dialog.errorLogKnow"),
-                            okText: t("dialog.errorLogCopy"),
-                            onOk() {
-                                Clipboard.setString(errorLogContent);
-                                Toast.success(t("toast.copiedToClipboard"));
-                            },
-                        });
-                    },
-                },
-                {
-                    title: t("basicSettings.developer.clearLog"),
-                    right: undefined,
-                    async onPress() {
-                        try {
-                            await clearLog();
-                            Toast.success(t("toast.logCleared"));
-                        } catch { }
-                    },
-                },
-            ],
-        },
+        // 开发选项整块移除（用户要求：不在设置里显示）
+        // 相关能力仍在代码中（debug.* 配置项、日志文件），
+        // 只是不再暴露 UI，避免误触。
     ];
+
+    // 同步给 ref，供 viewability 回调读取（避免闭包旧值）
+    basicOptionsRef.current = basicOptions;
 
     return (
         <View style={styles.wrapper}>
-            <FlatList
-                style={styles.headerContainer}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.headerContentContainer}
-                horizontal
-                data={basicOptions.map(it => it.title)}
-                renderItem={({ item, index }) => (
-                    <TouchableOpacity
-                        onPress={() => {
-                            sectionListRef.current?.scrollToLocation({
-                                sectionIndex: index,
-                                itemIndex: 0,
-                            });
-                        }}
-                        activeOpacity={0.7}
-                        style={styles.headerItemStyle}>
-                        <ThemeText fontWeight="bold">{item}</ThemeText>
-                    </TouchableOpacity>
-                )}
-            />
+            {/*
+              顶部分类导航（固定，不可拖动）
+              - scrollEnabled={false}：禁止横向拖动，位置固定死
+              - 点击直接跳转到对应 section
+              - 高亮当前所在分类
+            */}
+            <View style={styles.headerContainer}>
+                {basicOptions.map((section, index) => {
+                    const active = activeSection === index;
+                    return (
+                        <TouchableOpacity
+                            key={section.title}
+                            onPress={() => {
+                                sectionListRef.current?.scrollToLocation({
+                                    sectionIndex: index,
+                                    itemIndex: 0,
+                                    viewOffset: 0,
+                                    animated: true,
+                                });
+                                setActiveSection(index);
+                            }}
+                            activeOpacity={0.7}
+                            style={styles.headerItemStyle}>
+                            <ThemeText
+                                fontWeight="bold"
+                                fontColor={active ? "text" : "textSecondary"}>
+                                {section.title}
+                            </ThemeText>
+                            {/* 当前分类下方加一条高亮指示线 */}
+                            {active ? <View style={styles.headerActiveBar} /> : null}
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
             <SectionList
                 sections={basicOptions}
                 renderSectionHeader={({ section }) => (
@@ -606,6 +600,15 @@ export default function BasicSetting() {
                     </View>
                 )}
                 ref={sectionListRef}
+                // 键盘弹出时不要挡住输入区域，点击空白也能收键盘
+                keyboardShouldPersistTaps="handled"
+                // iOS 上自动给底部留出键盘高度
+                automaticallyAdjustKeyboardInsets
+                keyboardDismissMode="on-drag"
+                // 滚动时同步高亮当前分类
+                onViewableItemsChanged={viewableItemsChanged.current}
+                viewabilityConfig={viewabilityConfig}
+                contentContainerStyle={styles.listContentContainer}
                 renderSectionFooter={({ section }) => {
                     return section.footer ?? null;
                 }}
@@ -646,6 +649,12 @@ const styles = StyleSheet.create({
     },
     headerContainer: {
         height: rpx(80),
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-around",
+        paddingHorizontal: rpx(12),
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: "#88888833",
     },
     headerContentContainer: {
         height: rpx(80),
@@ -653,10 +662,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: rpx(24),
     },
     headerItemStyle: {
-        paddingHorizontal: rpx(36),
+        flex: 1,
         height: rpx(80),
         justifyContent: "center",
         alignItems: "center",
+        position: "relative",
+    },
+    /** 当前分类下方的指示条 */
+    headerActiveBar: {
+        position: "absolute",
+        bottom: 0,
+        height: rpx(4),
+        width: "60%",
+        borderRadius: rpx(2),
+        backgroundColor: "#FF6B6B",
+    },
+    /** SectionList 底部留白，避免最后一项贴着屏幕底 */
+    listContentContainer: {
+        paddingBottom: rpx(120),
     },
 });
 
