@@ -175,18 +175,44 @@ export function detectPlaySource(platform: string): "netease" | "qq" | "unknown"
 }
 
 /**
+ * 把各种形态的 id 归一化成平台原生 id。
+ *
+ * App 里 musicItem.id 有几种来源：
+ *   - 自研导入：纯 songmid（"003J4Xjo1NJvck"）/ 纯数字（"2747953391"）
+ *   - 插件 search 返回：带平台前缀（"qq_003QPfKz3s91GC" /
+ *                                   "netease_2668397359"）
+ *   - 还可能是 "qq:xxx" / "netease|xxx"
+ * 取链接口只认原生 id，这里统一剥掉前缀。
+ */
+export function normalizeSongId(rawId: string, source: "netease" | "qq"): string {
+    let s = String(rawId ?? "").trim();
+    // 剥掉 "qq_" / "netease_" / "qq:" / "163_" 等前缀
+    s = s.replace(/^(qq|netease|163|wy)[_:|\-]/i, "");
+    // 若仍是 "平台-xxx" 形态
+    s = s.replace(/^(qq|netease)[-]/i, "");
+    return s;
+}
+
+/**
  * 统一入口：优先自研接口，失败返回 null 交给插件兜底。
  */
 export async function getPlayUrlDirect(
-    musicItem: { id: string; platform: string },
+    musicItem: { id: string; platform: string; songmid?: string },
     quality = "standard",
 ): Promise<IPlayUrlResult | null> {
     const source = detectPlaySource(musicItem.platform);
 
+    // 优先用 songmid（QQ 插件 search 自带），否则从 id 归一化
+    const rawId = musicItem.songmid || musicItem.id;
+    const songId = normalizeSongId(rawId, source === "qq" ? "qq" : "netease");
+    if (!songId) {
+        return null;
+    }
+
     if (source === "netease") {
         // 依次尝试各音质（免费歌可能只有低音质）
         for (const q of [quality, "standard", "high", "low"]) {
-            const r = await getNeteasePlayUrl(musicItem.id, q);
+            const r = await getNeteasePlayUrl(songId, q);
             if (r) {
                 return r;
             }
@@ -196,7 +222,7 @@ export async function getPlayUrlDirect(
 
     if (source === "qq") {
         for (const q of [quality, "standard", "high", "low"]) {
-            const r = await getQQPlayUrl(musicItem.id, q);
+            const r = await getQQPlayUrl(songId, q);
             if (r) {
                 return r;
             }
