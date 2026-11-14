@@ -33,7 +33,18 @@ import _internalPluginMeta from "./meta";
 import { IPluginManager } from "@/types/core/pluginManager";
 
 
-axios.defaults.timeout = 2000;
+/*
+ * 插件网络超时。
+ *
+ * 原来写死 2000ms，是移动版「聚合取链失败：所有可用源均未取得播放链接」
+ * 的根因之一：padao 系插件取链会竞速多个第三方通道
+ * （tang.api.s01s.cn / api.vkeys.cn / musicserver.haitangw.cc 等），
+ * 这些接口在移动网络下普遍 >2s，全部超时后直接判定失败。
+ * 桌面版没有这个限制，所以同样的插件能正常播会员歌。
+ *
+ * 放宽到 15s，并单独保留一个更短的探测超时给 HEAD 请求（插件内部自己控制）。
+ */
+axios.defaults.timeout = 15000;
 axios.interceptors.response.use((response) => {
     // 统一setcookie格式，nodejs环境是数组，移动端环境都放在第一个元素
     const setCookie = response.headers["set-cookie"];
@@ -912,6 +923,18 @@ export class Plugin {
         try {
             if (typeof funcCode === "string") {
                 // 插件的环境变量
+                /*
+                 * 插件运行环境。
+                 *
+                 * 原来伪装成 android，会让 padao 系插件走移动端取链分支
+                 * （GetEVkey 等通道按插件自身说明「需家宽/真机 IP」，
+                 *  移动网络/数据中心 IP 下大概率被风控）。
+                 *
+                 * 桌面版 MusicFreeDesktop 传的是 win32，且能正常播会员歌。
+                 * 这里对齐桌面版，让插件走 PC 分支 + 第三方通道竞速。
+                 *
+                 * 注意：这只是给插件看的「环境标识」，不改变 RN 实际平台行为。
+                 */
                 const env = {
                     getUserVariables: () => {
                         return (
@@ -922,11 +945,11 @@ export class Plugin {
                         return this.getUserVariables() ?? {};
                     },
                     appVersion,
-                    os: "android",
+                    os: "win32",
                     lang: "zh-CN",
                 };
                 const _process = {
-                    platform: "android",
+                    platform: "win32",
                     version: appVersion,
                     env,
                 };
