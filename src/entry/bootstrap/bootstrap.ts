@@ -5,6 +5,7 @@ import { ImgAsset } from "@/constants/assetsConst";
 import { emptyFunction, localPluginHash, supportLocalMediaType } from "@/constants/commonConst";
 import pathConst from "@/constants/pathConst";
 import Config from "@/core/appConfig";
+import { setupCarPlay } from "@/core/carPlay";
 import downloader, { DownloadFailReason, DownloaderEvent } from "@/core/downloader";
 import LocalMusicSheet from "@/core/localMusicSheet";
 import lyricManager from "@/core/lyricManager";
@@ -105,6 +106,14 @@ async function bootstrapImpl() {
     ]);
     trace("配置初始化完成");
     logger.mark("配置初始化完成");
+
+    // CarPlay：歌单数据已就绪，启动原生双向桥（非 iOS / 无模块时静默 no-op）
+    try {
+        setupCarPlay();
+        logger.mark("CarPlay");
+    } catch (e) {
+        errorLog("CarPlay setup", e);
+    }
 
     // 加载插件。
     //
