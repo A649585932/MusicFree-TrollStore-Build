@@ -62,6 +62,41 @@
 		<string>fetch</string>
 	</array>
 
+	<!--
+	  CarPlay (音频类 App) Phase 0。
+	  UIApplicationSceneManifest 声明两套 UISceneConfigurations：
+	    - CPTemplateApplicationSceneSessionRoleApplication  -> 车机场景，delegate = MFCarPlaySceneDelegate
+	    - UIWindowSceneSessionRoleApplication              -> 主 App 场景
+	      显式把 delegateClass 留空并由 AppDelegate 的
+	      configurationForConnectingSceneSession: 返回 "Default Configuration"，
+	      让 RCTAppDelegate 继续用 legacy loadReactNativeWindow 建主窗口；
+	      UIApplicationSupportsMultipleScenes=NO 防止 RN 起第二份实例导致黑屏。
+	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>MFCarPlaySceneDelegate</string>
+				</dict>
+			</array>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+
 	<!-- 允许"文件"App 向 Documents 导入本地音乐与 .js 插件，并支持"打开方式" -->
 	<key>UIFileSharingEnabled</key>
 	<true/>
