@@ -494,7 +494,13 @@ class TrackPlayer extends EventEmitter<{
              */
             try {
                 const direct = await getPlayUrlDirect(
-                    { id: musicItem.id, platform: musicItem.platform },
+                    {
+                        id: musicItem.id,
+                        platform: musicItem.platform,
+                        // QQ 插件 search 返回的 musicItem 里带原生 songmid，
+                        // 优先用它（id 可能是 "qq_xxx" 带前缀形态）
+                        songmid: (musicItem as any)?.songmid,
+                    },
                     qualityOrder[0] ?? "standard",
                 );
                 if (direct?.url) {
