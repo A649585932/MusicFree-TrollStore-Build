@@ -21,14 +21,28 @@
 	    com.apple.private.cs.debugger            -> forces Developer Mode
 	    dynamic-codesigning,
 	    com.apple.private.skip-library-validation -> banned on iOS 15/A12+
+
+	  CarPlay (audio app):
+	    com.apple.developer.carplay-audio is required for the system to grant
+	    a CPTemplateApplicationScene. It is normally a protected entitlement
+	    needing a provisioning profile; TrollStore/CoreTrust does not validate
+	    entitlement legitimacy. Phase 0 probe exists to verify whether carplayd
+	    performs a secondary check on iOS 16.1.1. If the CarPlay screen does
+	    not appear, this path is blocked and a real signing route is needed.
+
+	  application-identifier / keychain-access-groups were updated from the
+	  legacy `app.musicfree.trollstore` to the actual bundle identifier
+	  `app.musicfree.ios` (system services are sensitive to mismatch).
 	-->
 	<key>application-identifier</key>
-	<string>app.musicfree.trollstore</string>
+	<string>app.musicfree.ios</string>
 	<key>com.apple.developer.team-identifier</key>
 	<string>TROLLTROLL</string>
+	<key>com.apple.developer.carplay-audio</key>
+	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>app.musicfree.trollstore</string>
+		<string>app.musicfree.ios</string>
 	</array>
 </dict>
 </plist>
