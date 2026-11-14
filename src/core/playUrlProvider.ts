@@ -34,43 +34,129 @@ const NETease_BR: Record<string, number> = {
 };
 
 /**
- * 从网易云取播放链接。
+ * 判断一个音频链接是不是「完整可播」而不是 30 秒试听片段。
  *
- * @param songId 歌曲 id（纯数字）
- * @param quality 音质偏好
+ * 依据：128kbps ≈ 16KB/秒，30 秒试听约 480KB。
+ * 用 HEAD 拿 Content-Length，低于 1MB（约 60 秒）一律判为片段。
+ * 拿不到长度时不轻易否定（有些 CDN 不回 Content-Length）。
+ */
+export async function isFullAudio(url: string): Promise<boolean> {
+    try {
+        const resp = await fetch(url, {
+            method: "HEAD",
+            headers: { "User-Agent": UA_IOS },
+        });
+        if (!resp.ok && resp.status !== 206) {
+            return false;
+        }
+        const len = Number(resp.headers.get("content-length")) || 0;
+        if (len > 0 && len < 1024 * 1024) {
+            // < 1MB：30 秒试听或极短片段，拒绝
+            return false;
+        }
+        return true;
+    } catch {
+        // HEAD 失败不能证明是片段，交给播放器（避免误杀）
+        return true;
+    }
+}
+
+/**
+ * 从网易云取播放链接 —— 对齐桌面版，三通道竞速 + 片段过滤。
+ *
+ * 背景（本地实测《先说谎的人》1903876057 /《吻得太逼真》5249178，
+ *       两首都是 fee=1 的 VIP 原版）：
+ *   - 官方 /api/song/enhance/player/url → code=-110, url 空（要 VIP）
+ *   - eapi 匿名通道 → 明确返回「trial clip 30s」（这就是用户听到的 30 秒）
+ *   - 桌面版插件靠第三方通道解 VIP，实测有 3 个能返回完整音频：
+ *       music-api.gdstudio.xyz（星海）→ 2.58MB / 3.56MB
+ *       oiapi.net                     → 2.58MB / 3.56MB
+ *       c.wwwweb.top（Ikun，插件内）→ 2.58MB / 3.56MB
+ *
+ * 这里内置前两个（纯 GET、免登录、带 size），官方接口作为最后兜底；
+ * 每个候选都过 isFullAudio，杜绝 30 秒片段抢答。
  */
 export async function getNeteasePlayUrl(
     songId: string,
     quality = "standard",
 ): Promise<IPlayUrlResult | null> {
     const br = NETease_BR[quality] ?? 320000;
-    const url = `https://music.163.com/api/song/enhance/player/url?ids=[${encodeURIComponent(
-        songId,
-    )}]&br=${br}`;
 
+    // ---- 通道 1：星海 music-api.gdstudio.xyz（返回 {url, br, size}）----
     try {
-        const resp = await fetch(url, {
-            headers: {
-                "User-Agent": UA_IOS,
-                Referer: "https://music.163.com/",
-                Accept: "application/json",
+        const resp = await fetch(
+            `https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=${encodeURIComponent(
+                songId,
+            )}&br=128`,
+            { headers: { "User-Agent": UA_IOS, Accept: "application/json" } },
+        );
+        if (resp.ok) {
+            const j: any = await resp.json();
+            const u = j?.url;
+            if (typeof u === "string" && /^https?:\/\//.test(u)) {
+                const size = typeof j?.size === "number" ? j.size : undefined;
+                // 通道自带 size 就能先过滤，省一次 HEAD
+                const sizeOk = size === undefined || size >= 1024 * 1024;
+                if (sizeOk && (await isFullAudio(u))) {
+                    return { url: u, quality, size, via: "netease-api" };
+                }
+            }
+        }
+    } catch {
+        /* 试下一个通道 */
+    }
+
+    // ---- 通道 2：oiapi.net（返回 {code, data:[{url}]}）----
+    try {
+        const resp = await fetch(
+            `https://oiapi.net/api/Music_163?id=${encodeURIComponent(songId)}&quality=128`,
+            { headers: { "User-Agent": UA_IOS, Accept: "application/json" } },
+        );
+        if (resp.ok) {
+            const j: any = await resp.json();
+            const u = j?.data?.[0]?.url ?? j?.url;
+            if (typeof u === "string" && /^https?:\/\//.test(u)) {
+                if (await isFullAudio(u)) {
+                    return { url: u, quality, via: "netease-api" };
+                }
+            }
+        }
+    } catch {
+        /* 试下一个通道 */
+    }
+
+    // ---- 通道 3：官方接口（免费歌走这里；VIP 歌会 -110）----
+    try {
+        const resp = await fetch(
+            `https://music.163.com/api/song/enhance/player/url?ids=[${encodeURIComponent(
+                songId,
+            )}]&br=${br}`,
+            {
+                headers: {
+                    "User-Agent": UA_IOS,
+                    Referer: "https://music.163.com/",
+                    Accept: "application/json",
+                },
             },
-        });
+        );
         if (!resp.ok) {
             return null;
         }
         const json: any = await resp.json();
         const d = json?.data?.[0];
         if (!d?.url) {
-            // code=-110 表示 VIP/版权受限，静默返回 null
+            // code=-110 = VIP/版权受限，交给插件回退
             return null;
         }
-        return {
-            url: String(d.url),
-            quality,
-            size: typeof d.size === "number" ? d.size : undefined,
-            via: "netease-api",
-        };
+        const size = typeof d.size === "number" ? d.size : undefined;
+        if (size !== undefined && size < 1024 * 1024) {
+            // 明显是试听片段，不用
+            return null;
+        }
+        if (!(await isFullAudio(String(d.url)))) {
+            return null;
+        }
+        return { url: String(d.url), quality, size, via: "netease-api" };
     } catch {
         return null;
     }
@@ -134,26 +220,27 @@ export async function getQQPlayUrl(
         }
         const json: any = await resp.json();
 
-        // 依次挑一个非空链接
+        // 依次挑一个「完整」链接（过滤 30 秒试听片段）
         for (const key of fields) {
             const u = json?.[key];
             if (typeof u === "string" && /^https?:\/\//.test(u)) {
-                return {
-                    url: u,
-                    quality,
-                    via: "qq-api",
-                };
+                if (await isFullAudio(u)) {
+                    return { url: u, quality, via: "qq-api" };
+                }
             }
         }
 
-        // 兜底：扫描所有 song_play_url* 字段（接口新增音质时不会漏）
+        // 兜底：扫描所有 song_play_url* 字段（接口新增音质时不会漏），
+        // 同样只接受完整音频
         for (const [k, v] of Object.entries(json ?? {})) {
             if (
                 k.startsWith("song_play_url") &&
                 typeof v === "string" &&
                 /^https?:\/\//.test(v)
             ) {
-                return { url: v, quality, via: "qq-api" };
+                if (await isFullAudio(v)) {
+                    return { url: v, quality, via: "qq-api" };
+                }
             }
         }
         return null;
