@@ -11,5 +11,6 @@
       "@/*": ["./src/*"]
     },
     "types": ["node"]
-  }
+  },
+  "exclude": ["build", "node_modules", "android", "ios/Pods"]
 }
