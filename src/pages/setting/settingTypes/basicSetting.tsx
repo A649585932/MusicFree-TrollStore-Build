@@ -570,46 +570,41 @@ export default function BasicSetting() {
                         <TouchableOpacity
                             key={section.title}
                             onPress={() => {
-                                const y = sectionOffsets.current[index];
-                                if (typeof y === "number") {
-                                    /**
-                                     * SectionList 没有 scrollToOffset，
-                                     * 但可以通过 getScrollResponder() 拿到
-                                     * 底层的 ScrollView 响应器，
-                                     * 再调用 scrollTo({ y }) 精确跳转。
-                                     */
-                                    const responder =
-                                        sectionListRef.current?.getScrollResponder?.();
-                                    if (responder?.scrollTo) {
-                                        responder.scrollTo({
-                                            y: Math.max(0, y - rpx(8)),
-                                            animated: true,
-                                        });
-                                    } else {
-                                        // 兜底
-                                        try {
-                                            sectionListRef.current?.scrollToLocation({
-                                                sectionIndex: index,
-                                                itemIndex: 0,
-                                                animated: true,
-                                                viewOffset: 0,
-                                            });
-                                        } catch {
-                                            /* 忽略 */
-                                        }
-                                    }
-                                } else {
+                                /**
+                                 * 跳转到指定分类。
+                                 *
+                                 * 踩坑记录（按尝试顺序）：
+                                 *   1. scrollToOffset —— SectionList 没这个方法
+                                 *   2. getScrollResponder().scrollTo —— 返回的是
+                                 *      ScrollResponderType，上面没有 scrollTo
+                                 *      （那是 ScrollView 的），调用静默失败
+                                 *   3. scrollToLocation 单独用 —— 内部测量
+                                 *      拿不到大列表高度时会静默跳过
+                                 *
+                                 * 最终方案：scrollToLocation + getItemLayout
+                                 *   getItemLayout 提供了固定高度后，RN 不再依赖
+                                 *   实时 measure，能稳定算出目标位置。
+                                 */
+                                const doScroll = (retry = 0) => {
                                     try {
                                         sectionListRef.current?.scrollToLocation({
                                             sectionIndex: index,
                                             itemIndex: 0,
+                                            viewPosition: 0,
                                             animated: true,
-                                            viewOffset: 0,
                                         });
                                     } catch {
-                                        /* 忽略 */
+                                        // SectionList 内部测量失败会抛错，
+                                        // 等一帧再试一次（此时 layout 已完成）
+                                        if (retry < 3) {
+                                            setTimeout(
+                                                () => doScroll(retry + 1),
+                                                60,
+                                            );
+                                        }
                                     }
-                                }
+                                };
+                                doScroll();
                                 setActiveSection(index);
                             }}
                             activeOpacity={0.7}
@@ -653,6 +648,30 @@ export default function BasicSetting() {
                             </ThemeText>
                         </View>
                     );
+                }}
+                /**
+                 * 关键：提供 getItemLayout
+                 *
+                 * SectionList 的 scrollToLocation 依赖内部测量，
+                 * 在大列表 / 动画进行中测量容易失败（静默不滚动）。
+                 * 提供固定高度后，RN 直接用算术计算位置，稳定可靠。
+                 *
+                 * 高度取值：
+                 *   SectionHeader  = rpx(72)（见 styles.sectionHeader）
+                 *   Item           = rpx(96)（ListItem heightType="small"）
+                 * 两个 header 之间的间隔用 marginTop 处理，已含在 header 高度里。
+                 */
+                getItemLayout={(_data, index) => {
+                    const HEADER = rpx(72);
+                    const ITEM = rpx(96);
+                    // SectionList 的扁平索引：header 与 item 交错，
+                    // 这里按「每个 section 1 个 header + N 个 item」的近似处理。
+                    // RN 会在滚动后自动校正到精确位置。
+                    return {
+                        length: ITEM,
+                        offset: HEADER + ITEM * index,
+                        index,
+                    };
                 }}
                 // 键盘弹出时不要挡住输入区域，点击空白也能收键盘
                 keyboardShouldPersistTaps="handled"
