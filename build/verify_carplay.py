@@ -1,27 +1,26 @@
-"""CarPlay Phase 0 本地静态校验"""
+"""CarPlay 方案 F 静态校验"""
 import io
 import os
 import plistlib
 import re
 import subprocess
 import sys
+from collections import Counter
 
 ROOT = r"C:\Users\Alone\Downloads\Telegram Desktop\MusicFree-iOS"
-PY = sys.executable
 ok = True
 
 
 def chk(name, cond, detail=""):
     global ok
     mark = "OK " if cond else "NG "
-    # 控制台可能是 GBK，detail 里的中文/emoji 全部 ascii 化
     safe = detail.encode("ascii", "replace").decode("ascii")
     print(f"  [{mark}] {name} {safe}")
     if not cond:
         ok = False
 
 
-# 1) Info.plist 合法 + 方案 B：不声明 SceneManifest（保主 App legacy 路径）
+# 1) Info.plist：两个 role 都显式 delegateClass
 info = os.path.join(ROOT, "ios", "MusicFree", "Info.plist")
 try:
     pl = plistlib.load(open(info, "rb"))
@@ -31,10 +30,16 @@ except Exception as e:
     chk("Info.plist 可解析", False, str(e))
 
 sm = pl.get("UIApplicationSceneManifest")
-chk("方案 B: 无 SceneManifest (主 App 不黑屏)", sm is None,
-    f"present={bool(sm)}")
-# 主 App 关键键仍保留
-chk("UILaunchScreen 仍保留", isinstance(pl.get("UILaunchScreen"), dict))
+chk("SceneManifest 存在(方案F)", isinstance(sm, dict))
+cfgs = (sm or {}).get("UISceneConfigurations", {})
+chk("SupportsMultipleScenes=NO", (sm or {}).get("UIApplicationSupportsMultipleScenes") is False)
+win = cfgs.get("UIWindowSceneSessionRoleApplication", [{}])
+chk("主场景 delegateClass=AppDelegate", win and win[0].get("UISceneDelegateClassName") == "AppDelegate")
+chk("主场景无 StoryboardFile", win and "UISceneStoryboardFile" not in win[0])
+car = cfgs.get("CPTemplateApplicationSceneSessionRoleApplication", [{}])
+chk("CarPlay delegateClass=MFCarPlaySceneDelegate",
+    car and car[0].get("UISceneDelegateClassName") == "MFCarPlaySceneDelegate")
+chk("UILaunchScreen 保留", isinstance(pl.get("UILaunchScreen"), dict))
 chk("UIBackgroundModes 含 audio", "audio" in (pl.get("UIBackgroundModes") or []))
 
 # 2) entitlements
@@ -42,51 +47,41 @@ ent = os.path.join(ROOT, "scripts", "trollstore.entitlements.plist")
 try:
     e = plistlib.load(open(ent, "rb"))
     chk("entitlements 可解析", True)
-    chk("carplay-audio = true", e.get("com.apple.developer.carplay-audio") is True)
-    chk("application-identifier = app.musicfree.ios",
-        e.get("application-identifier") == "app.musicfree.ios")
-    chk("keychain 同步修正", "app.musicfree.ios" in str(e.get("keychain-access-groups")))
+    chk("carplay-audio=true", e.get("com.apple.developer.carplay-audio") is True)
+    chk("application-identifier 正确", e.get("application-identifier") == "app.musicfree.ios")
 except Exception as ex:
     chk("entitlements 可解析", False, str(ex))
 
-# 3) 源文件存在 + 内容关键点
+# 3) 源文件
 h = io.open(os.path.join(ROOT, "ios", "MusicFree", "CarPlaySceneDelegate.h"), encoding="utf-8").read()
 m = io.open(os.path.join(ROOT, "ios", "MusicFree", "CarPlaySceneDelegate.m"), encoding="utf-8").read()
 a = io.open(os.path.join(ROOT, "ios", "MusicFree", "AppDelegate.mm"), encoding="utf-8").read()
-chk("CarPlaySceneDelegate.h 声明 delegate", "CPTemplateApplicationSceneDelegate" in h)
-chk("CarPlaySceneDelegate.m 实现 didConnect", "didConnectInterfaceController" in m)
-chk("CarPlaySceneDelegate.m 用 setRootTemplate", "setRootTemplate" in m)
-chk("AppDelegate 实现 configurationForConnecting", "configurationForConnectingSceneSession" in a)
-chk("AppDelegate 判断 CarPlay role", "CPTemplateApplicationSceneSessionRoleApplication" in a)
-chk("AppDelegate 主场景返回 nil (legacy)", "return nil;" in a)
-chk("AppDelegate import CarPlaySceneDelegate.h", '#import "CarPlaySceneDelegate.h"' in a)
-chk("AppDelegate 保留 moduleName=MusicFree", 'self.moduleName = @"MusicFree"' in a)
-chk("AppDelegate 无 willConnectToSession (方案 B 不需要)", "willConnectToSession" not in a)
+chk("CarPlaySceneDelegate 声明", "CPTemplateApplicationSceneDelegate" in h)
+chk("CarPlaySceneDelegate didConnect", "didConnectInterfaceController" in m)
+chk("CarPlaySceneDelegate 用稳定 API", "initWithText:" in m and "detailText:" in m and "accessoryType" not in m)
+chk("AppDelegate 有 willConnectToSession", "willConnectToSession" in a)
+chk("AppDelegate 用 sharedApplication.delegate 取 window", "UIApplication.sharedApplication.delegate" in a)
+chk("AppDelegate setWindowScene + makeKeyAndVisible", "setWindowScene" in a and "makeKeyAndVisible" in a)
+chk("AppDelegate 无 configurationForConnecting(避免破坏legacy)", "configurationForConnectingSceneSession" not in a)
+chk("AppDelegate 用 NSLog 埋点", "[MusicFree] key window attached" in a)
+chk("AppDelegate 保留 moduleName", 'self.moduleName = @"MusicFree"' in a)
 
 # 4) pbxproj
 pbx = io.open(os.path.join(ROOT, "ios", "MusicFree.xcodeproj", "project.pbxproj"), encoding="utf-8").read()
-chk("pbxproj 含 .m in Sources", "CarPlaySceneDelegate.m in Sources" in pbx)
-chk("pbxproj 含 .h fileRef", "CarPlaySceneDelegate.h" in pbx)
-chk("pbxproj 弱链接 CarPlay（拆分格式）",
-    '"-weak_framework"' in pbx and '"CarPlay"' in pbx,
-    f'weak={pbx.count(chr(34)+"-weak_framework"+chr(34))} carplay={pbx.count(chr(34)+"CarPlay"+chr(34))}')
-chk("pbxproj 无合并的单 flag（会编译失败）",
-    '"-weak_framework CarPlay"' not in pbx)
-# UUID 唯一性：同一个 id 允许出现多次（引用），但作为「定义」只能定义一次
-# 定义形如 `XXXX /* ... */ = {isa = ...`，统计这种形态
+chk("pbxproj .m in Sources", "CarPlaySceneDelegate.m in Sources" in pbx)
+chk("pbxproj 弱链接拆开", '"-weak_framework"' in pbx and '"CarPlay"' in pbx)
+chk("pbxproj 无合并 flag", '"-weak_framework CarPlay"' not in pbx)
 defs = re.findall(r'^\s*([A-F0-9]{24}) /\*.*?\*/ = \{isa = ', pbx, re.M)
-from collections import Counter
 dup = [k for k, v in Counter(defs).items() if v > 1 and k.startswith("C4A9C9")]
-chk("new UUID definitions unique", len(dup) == 0, str(dup[:3]))
+chk("新 UUID 定义唯一", len(dup) == 0, str(dup[:3]))
 
-# 既有自检脚本
+# 5) 既有自检
 r = subprocess.run(["node", "scripts/verify-ios-patch.mjs"], cwd=ROOT,
                    capture_output=True, timeout=120)
 out = (r.stdout or b"").decode("utf-8", errors="replace")
-tail = out.strip().split("\n")[-2:]
-chk("verify-ios-patch 11/11", "11/11" in out, " ".join(tail))
+chk("verify-ios-patch 11/11", "11/11" in out, " ".join(out.strip().split("\n")[-2:]))
 
 print()
 print("=" * 50)
-print("Phase 0 static check:", "ALL PASS" if ok else "FAILED")
+print("Phase 0 plan F static check:", "ALL PASS" if ok else "FAILED")
 sys.exit(0 if ok else 1)
