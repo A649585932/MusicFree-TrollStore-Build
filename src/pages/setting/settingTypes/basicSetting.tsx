@@ -1,4 +1,3 @@
-import ColorBlock from "@/components/base/colorBlock";
 import ListItem from "@/components/base/listItem";
 import ThemeSwitch from "@/components/base/switch";
 import ThemeText from "@/components/base/themeText";
@@ -16,7 +15,6 @@ import { clearCache, getCacheSize, sizeFormatter } from "@/utils/fileUtils";
 import { qualityKeys } from "@/utils/qualities";
 import rpx from "@/utils/rpx";
 import Toast from "@/utils/toast";
-import Slider from "@react-native-community/slider";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { SectionList, StyleSheet, TouchableOpacity, View } from "react-native";
 import { readdir } from "react-native-fs";
@@ -775,67 +773,9 @@ function LyricSetting() {
         enableAutoSearchLyric ?? false,
     );
 
-    const openStatusBarLyric = createSwitch(
-        t("basicSettings.lyric.showStatusBarLyric"),
-        "lyric.showStatusBarLyric",
-        showStatusBarLyric ?? false,
-        async newValue => {
-            try {
-                if (newValue) {
-                    const hasPermission =
-                        await LyricUtil.checkSystemAlertPermission();
-
-                    if (hasPermission) {
-                        const statusBarLyricConfig = {
-                            topPercent: Config.getConfig("lyric.topPercent"),
-                            leftPercent: Config.getConfig("lyric.leftPercent"),
-                            align: Config.getConfig("lyric.align"),
-                            color: Config.getConfig("lyric.color"),
-                            backgroundColor: Config.getConfig("lyric.backgroundColor"),
-                            widthPercent: Config.getConfig("lyric.widthPercent"),
-                            fontSize: Config.getConfig("lyric.fontSize"),
-                        };
-                        LyricUtil.showStatusBarLyric(
-                            "MusicFree",
-                            statusBarLyricConfig ?? {}
-                        );
-                        Config.setConfig("lyric.showStatusBarLyric", true);
-                    } else {
-                        LyricUtil.requestSystemAlertPermission().finally(() => {
-                            Toast.warn(t("toast.noFloatWindowPermission"));
-                        });
-                    }
-                } else {
-                    LyricUtil.hideStatusBarLyric();
-                    Config.setConfig("lyric.showStatusBarLyric", false);
-                }
-            } catch { }
-        },
-    );
-
-    const alignStatusBarLyric = createRadio(
-        t("basicSettings.lyric.align"),
-        "lyric.align",
-        [
-            NativeTextAlignment.LEFT,
-            NativeTextAlignment.CENTER,
-            NativeTextAlignment.RIGHT,
-        ],
-        align ?? NativeTextAlignment.CENTER,
-        {
-            [NativeTextAlignment.LEFT]: t("basicSettings.lyric.align.left"),
-            [NativeTextAlignment.CENTER]: t("basicSettings.lyric.align.center"),
-            [NativeTextAlignment.RIGHT]: t("basicSettings.lyric.align.right"),
-        },
-        newVal => {
-            if (showStatusBarLyric) {
-                LyricUtil.setStatusBarLyricAlign(newVal as any);
-            }
-        },
-    );
-
     return (
         <View>
+            {/* 歌词缺失时自动搜索歌词（iOS 上仍有效） */}
             <ListItem
                 withHorizontalPadding
                 heightType="small"
@@ -843,162 +783,16 @@ function LyricSetting() {
                 <ListItem.Content title={autoSearchLyric.title} />
                 {autoSearchLyric.right}
             </ListItem>
-            <ListItem
-                withHorizontalPadding
-                heightType="small"
-                onPress={openStatusBarLyric.onPress}>
-                <ListItem.Content title={openStatusBarLyric.title} />
-                {openStatusBarLyric.right}
-            </ListItem>
-            <View style={lyricStyles.sliderContainer}>
-                <ThemeText>{t("basicSettings.lyric.leftRightDistance")}</ThemeText>
-                <Slider
-                    style={lyricStyles.slider}
-                    minimumTrackTintColor={colors.primary}
-                    maximumTrackTintColor={colors.text ?? "#999999"}
-                    thumbTintColor={colors.primary}
-                    minimumValue={0}
-                    step={0.01}
-                    value={leftPercent ?? 0.5}
-                    maximumValue={1}
-                    onValueChange={val => {
-                        if (showStatusBarLyric) {
-                            LyricUtil.setStatusBarLyricLeft(val);
-                        }
-                    }}
-                    onSlidingComplete={val => {
-                        Config.setConfig("lyric.leftPercent", val);
-                    }}
-                />
-            </View>
-            <View style={lyricStyles.sliderContainer}>
-                <ThemeText>{t("basicSettings.lyric.topBottomDistance")}</ThemeText>
-                <Slider
-                    style={lyricStyles.slider}
-                    minimumTrackTintColor={colors.primary}
-                    maximumTrackTintColor={colors.text ?? "#999999"}
-                    thumbTintColor={colors.primary}
-                    minimumValue={0}
-                    value={topPercent ?? 0}
-                    step={0.01}
-                    maximumValue={1}
-                    onValueChange={val => {
-                        if (showStatusBarLyric) {
-                            LyricUtil.setStatusBarLyricTop(val);
-                        }
-                    }}
-                    onSlidingComplete={val => {
-                        Config.setConfig("lyric.topPercent", val);
-                    }}
-                />
-            </View>
-            <View style={lyricStyles.sliderContainer}>
-                <ThemeText>{t("basicSettings.lyric.width")}</ThemeText>
-                <Slider
-                    style={lyricStyles.slider}
-                    minimumTrackTintColor={colors.primary}
-                    maximumTrackTintColor={colors.text ?? "#999999"}
-                    thumbTintColor={colors.primary}
-                    minimumValue={0}
-                    step={0.01}
-                    value={widthPercent ?? 0.5}
-                    maximumValue={1}
-                    onValueChange={val => {
-                        if (showStatusBarLyric) {
-                            LyricUtil.setStatusBarLyricWidth(val);
-                        }
-                    }}
-                    onSlidingComplete={val => {
-                        Config.setConfig("lyric.widthPercent", val);
-                    }}
-                />
-            </View>
-            <View style={lyricStyles.sliderContainer}>
-                <ThemeText>{t("basicSettings.lyric.fontSize")}</ThemeText>
-                <Slider
-                    style={lyricStyles.slider}
-                    minimumTrackTintColor={colors.primary}
-                    maximumTrackTintColor={colors.text ?? "#999999"}
-                    thumbTintColor={colors.primary}
-                    minimumValue={Math.round(rpx(18))}
-                    step={0.5}
-                    maximumValue={Math.round(rpx(56))}
-                    value={fontSize ?? Math.round(rpx(24))}
-                    onValueChange={val => {
-                        if (showStatusBarLyric) {
-                            LyricUtil.setStatusBarLyricFontSize(val);
-                        }
-                    }}
-                    onSlidingComplete={val => {
-                        Config.setConfig("lyric.fontSize", val);
-                    }}
-                />
-            </View>
-            <ListItem
-                withHorizontalPadding
-                heightType="small"
-                onPress={alignStatusBarLyric.onPress}>
-                <ListItem.Content title={alignStatusBarLyric.title} />
-                {alignStatusBarLyric.right}
-            </ListItem>
-            <ListItem
-                withHorizontalPadding
-                heightType="small"
-                onPress={() => {
-                    showPanel("ColorPicker", {
-                        closePanelWhenSelected: true,
-                        defaultColor: color ?? "transparent",
-                        onSelected(color) {
-                            if (showStatusBarLyric) {
-                                const colorStr = color.hexa();
-                                LyricUtil.setStatusBarColors(colorStr, null);
-                                Config.setConfig("lyric.color", colorStr);
-                            }
-                        },
-                    });
-                }}>
-                <ListItem.Content title={t("basicSettings.lyric.textColor")} />
-                <ColorBlock color={color ?? "#FFE9D2FF"} />
-            </ListItem>
-            <ListItem
-                withHorizontalPadding
-                heightType="small"
-                onPress={() => {
-                    showPanel("ColorPicker", {
-                        closePanelWhenSelected: true,
-                        defaultColor:
-                            backgroundColor ?? "transparent",
-                        onSelected(color) {
-                            if (showStatusBarLyric) {
-                                const colorStr = color.hexa();
-                                LyricUtil.setStatusBarColors(null, colorStr);
-                                Config.setConfig(
-                                    "lyric.backgroundColor",
-                                    colorStr,
-                                );
-                            }
-                        },
-                    });
-                }}>
-                <ListItem.Content title={t("basicSettings.lyric.backgroundColor")} />
-                <ColorBlock
-                    color={backgroundColor ?? "#84888153"}
-                />
-            </ListItem>
+            {/*
+              桌面歌词（状态栏歌词）相关设置已移除：
+                - 开启桌面歌词
+                - 左右距离 / 上下距离 / 歌词宽度 / 字体大小
+                - 对齐方式 / 文本颜色 / 文本背景色
+
+              iOS 上 LyricUtil 是空实现（shim），这些开关改了也不会有任何
+              效果，留着只会误导用户。
+            */}
         </View>
     );
 }
 
-const lyricStyles = StyleSheet.create({
-    slider: {
-        flex: 1,
-        marginLeft: rpx(24),
-    },
-    sliderContainer: {
-        height: rpx(96),
-        width: "100%",
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: rpx(24),
-    },
-});
