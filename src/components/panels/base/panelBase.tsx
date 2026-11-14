@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
     BackHandler,
     DeviceEventEmitter,
-    KeyboardAvoidingView,
+    Keyboard,
     NativeEventSubscription,
     Platform,
     Pressable,
@@ -62,6 +62,44 @@ export default function (props: IPanelBaseProps) {
     const backHandlerRef = useRef<NativeEventSubscription>();
 
     const hideCallbackRef = useRef<Function[]>([]);
+
+    /**
+     * 键盘避让：手动监听键盘高度，直接把面板顶上去。
+     *
+     * 为什么不用 KeyboardAvoidingView：
+     *   面板是 position:absolute + translateY 动画，KAV 计算的是自己的
+     *   layout 高度，两者基准不一致，在 iOS 上算不出正确位移，
+     *   结果输入框仍然被键盘盖住（实测确认）。
+     *
+     * 手动监听 keyboardWillShow/Hide 拿精确高度，直接作用到面板的
+     * bottom / translateY 上，最可靠。
+     */
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+    useEffect(() => {
+        if (keyboardAvoidBehavior === "none") {
+            return;
+        }
+
+        const showEvent =
+            Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+        const hideEvent =
+            Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+        const onShow = Keyboard.addListener(showEvent, e => {
+            const h = e.endCoordinates?.height ?? 0;
+            // iOS 上底部还有安全区，键盘高度已包含，不要再叠加
+            setKeyboardHeight(h);
+        });
+        const onHide = Keyboard.addListener(hideEvent, () => {
+            setKeyboardHeight(0);
+        });
+
+        return () => {
+            onShow.remove();
+            onHide.remove();
+        };
+    }, [keyboardAvoidBehavior]);
 
     useEffect(() => {
         snapPoint.value = withTiming(1, timingConfig);
@@ -163,10 +201,14 @@ export default function (props: IPanelBaseProps) {
                 style.wrapper,
                 orientation === "horizontal" ? {
                     height: vh(100) - safeAreaInsets.top,
-                    bottom: 0,
+                    bottom: keyboardHeight,
                 } : {
                     top: positionMethod === "top" ? (NativeUtils.getWindowDimensions().height + safeAreaInsets.top) - height - safeAreaInsets.bottom : undefined,
-                    bottom: positionMethod === "bottom" ? 0 : undefined,
+                    // 键盘弹起时把面板整体顶上来，输入框自然露在键盘上方
+                    bottom:
+                        positionMethod === "bottom"
+                            ? keyboardHeight
+                            : undefined,
                     height: height,
                 },
                 {
@@ -189,30 +231,12 @@ export default function (props: IPanelBaseProps) {
                     style={[style.maskWrapper, style.mask, maskAnimated]}
                 />
             </Pressable>
-            {keyboardAvoidBehavior === "none" ? (
-                panelBody
-            ) : (
-                <KeyboardAvoidingView
-                    style={style.kbContainer}
-                    /*
-                     * 关键修复：底部面板被输入法遮住
-                     *
-                     * 原来固定用 "position"，在 iOS 上对「绝对定位 + transform
-                     * 动画」的面板不生效——KeyboardAvoidingView 计算的是自己的
-                     * layout，而面板是用 translateY 移上来的，两者不一致。
-                     *
-                     * 改成：
-                     *   iOS     → "padding"：直接把面板往上顶，最稳
-                     *   Android → "height" ：Android 有 adjustResize，height 够用
-                     */
-                    behavior={
-                        keyboardAvoidBehavior ||
-                        (Platform.OS === "ios" ? "padding" : "height")
-                    }
-                    keyboardVerticalOffset={0}>
-                    {panelBody}
-                </KeyboardAvoidingView>
-            )}
+            {/*
+              面板本身已经通过 keyboardHeight 手动避让（见上面的
+              Keyboard.addListener），不再需要 KeyboardAvoidingView
+              再包一层——两者叠加反而会算错位移。
+            */}
+            {panelBody}
         </>
     );
 }
