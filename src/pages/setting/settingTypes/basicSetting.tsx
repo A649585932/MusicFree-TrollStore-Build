@@ -438,7 +438,9 @@ export default function BasicSetting() {
                 createSwitch(
                     t("basicSettings.useCelluarNetworkPlay"),
                     "basic.useCelluarNetworkPlay",
-                    useCelluarNetworkPlay ?? false,
+                    // 默认打开（appConfig.setup 会把 true 写进 MMKV 作为种子；
+                    // 这里的 ?? true 保证 UI 兜底显示与实际拦截逻辑一致）
+                    useCelluarNetworkPlay ?? true,
                 ),
                 createSwitch(
                     t("basicSettings.useCelluarNetworkDownload"),
