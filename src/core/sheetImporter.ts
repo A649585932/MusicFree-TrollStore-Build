@@ -24,6 +24,12 @@ export interface INormalizedSong {
     /** 秒 */
     duration?: number;
     artwork?: string;
+    /**
+     * 各音质元信息（对齐桌面版 musicItem.qualities）。
+     * 插件 getMediaSource 会读它判断可用音质与文件大小。
+     * 形如 { "128k": {size}, "320k": {size}, flac: {size} }
+     */
+    qualities?: Record<string, { size?: number }>;
     /** 原始数据，便于调试 */
     raw?: any;
 }
@@ -178,22 +184,46 @@ export async function fetchNeteaseSheet(
         }
     }
 
-    const songs: INormalizedSong[] = allTracks.map((t: any) => ({
-        id: String(t.id),
-        title: t.name ?? "",
-        artist:
-            (t.ar ?? t.artists ?? []).map((a: any) => a.name).join("/") ||
-            "未知歌手",
-        album: t.al?.name ?? t.album?.name ?? undefined,
-        duration:
-            typeof t.dt === "number"
-                ? Math.round(t.dt / 1000)
-                : typeof t.duration === "number"
-                  ? Math.round(t.duration / 1000)
-                  : undefined,
-        artwork: t.al?.picUrl ?? t.album?.picUrl ?? undefined,
-        raw: t,
-    }));
+    const songs: INormalizedSong[] = allTracks.map((t: any) => {
+        /*
+         * 网易云两种接口字段名不同：
+         *   /api/v6/playlist/detail  -> l / m / h / sq 对象 {size, br}
+         *   /api/song/detail         -> lMusic / mMusic / hMusic / sqMusic 对象 {size, bitrate}
+         * 后者在 allTracks 被 extra 覆盖时生效，必须都兼容。
+         */
+        const qualities: Record<string, { size?: number }> = {};
+        const nq: Record<string, string[]> = {
+            "128k": ["l", "lMusic"],
+            "320k": ["h", "hMusic"],
+            flac: ["sq", "sqMusic"],
+        };
+        for (const [q, keys] of Object.entries(nq)) {
+            for (const k of keys) {
+                const sz = t?.[k]?.size;
+                if (typeof sz === "number" && sz > 0) {
+                    qualities[q] = { size: sz };
+                    break;
+                }
+            }
+        }
+        return {
+            id: String(t.id),
+            title: t.name ?? "",
+            artist:
+                (t.ar ?? t.artists ?? []).map((a: any) => a.name).join("/") ||
+                "未知歌手",
+            album: t.al?.name ?? t.album?.name ?? undefined,
+            duration:
+                typeof t.dt === "number"
+                    ? Math.round(t.dt / 1000)
+                    : typeof t.duration === "number"
+                      ? Math.round(t.duration / 1000)
+                      : undefined,
+            artwork: t.al?.picUrl ?? t.album?.picUrl ?? undefined,
+            qualities: Object.keys(qualities).length ? qualities : undefined,
+            raw: t,
+        } as INormalizedSong;
+    });
 
     return {
         source: "netease",
@@ -276,6 +306,29 @@ export async function fetchQQSheet(sheetId: string): Promise<IImportResult> {
                 singers = s.singer;
             }
             const albumMid = s?.albummid ?? s?.album?.mid;
+            /*
+             * QQ 歌单接口（fcg_ucc_getcdinfo_byids_cp）在顶层给出
+             * size128 / size320 / sizeflac 等数字；
+             * 另一形态是嵌套在 file.size_128mp3 等字段里。两种都兼容。
+             * 桌面版 musicItem 带 qualities，插件取链时会读它。
+             */
+            const f = s?.file ?? {};
+            const qualities: Record<string, { size?: number }> = {};
+            const qmap: Record<string, string[]> = {
+                "128k": ["size128", "size_128mp3"],
+                "320k": ["size320", "size_320mp3"],
+                flac: ["sizeflac", "size_flac"],
+                "192k": ["sizeogg", "size_192aac"],
+            };
+            for (const [q, keys] of Object.entries(qmap)) {
+                for (const k of keys) {
+                    const sz = s?.[k] ?? f?.[k];
+                    if (typeof sz === "number" && sz > 0) {
+                        qualities[q] = { size: sz };
+                        break;
+                    }
+                }
+            }
             return {
                 id: String(mid),
                 title: s.songname ?? s.name ?? s.title ?? "",
@@ -288,6 +341,7 @@ export async function fetchQQSheet(sheetId: string): Promise<IImportResult> {
                       albumMid +
                       ".jpg"
                     : undefined,
+                qualities: Object.keys(qualities).length ? qualities : undefined,
                 raw: s,
             } as INormalizedSong;
         })
