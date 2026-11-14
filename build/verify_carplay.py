@@ -21,7 +21,7 @@ def chk(name, cond, detail=""):
         ok = False
 
 
-# 1) Info.plist 合法 + SceneManifest 键
+# 1) Info.plist 合法 + 方案 B：不声明 SceneManifest（保主 App legacy 路径）
 info = os.path.join(ROOT, "ios", "MusicFree", "Info.plist")
 try:
     pl = plistlib.load(open(info, "rb"))
@@ -31,21 +31,11 @@ except Exception as e:
     chk("Info.plist 可解析", False, str(e))
 
 sm = pl.get("UIApplicationSceneManifest")
-chk("UIApplicationSceneManifest 存在", isinstance(sm, dict))
-if isinstance(sm, dict):
-    chk("UIApplicationSupportsMultipleScenes=NO", sm.get("UIApplicationSupportsMultipleScenes") is False)
-    cfgs = sm.get("UISceneConfigurations", {})
-    chk("CPTemplateApplicationSceneSessionRoleApplication 存在",
-        "CPTemplateApplicationSceneSessionRoleApplication" in cfgs)
-    chk("UIWindowSceneSessionRoleApplication 存在",
-        "UIWindowSceneSessionRoleApplication" in cfgs)
-    carplay = cfgs.get("CPTemplateApplicationSceneSessionRoleApplication", [{}])
-    chk("CarPlay delegate = MFCarPlaySceneDelegate",
-        carplay and carplay[0].get("UISceneDelegateClassName") == "MFCarPlaySceneDelegate")
-    win = cfgs.get("UIWindowSceneSessionRoleApplication", [{}])
-    chk("主场景不带 StoryboardFile（避免 nib 崩溃）",
-        win and "UISceneStoryboardFile" not in win[0])
-    chk("UILaunchScreen 仍保留", isinstance(pl.get("UILaunchScreen"), dict))
+chk("方案 B: 无 SceneManifest (主 App 不黑屏)", sm is None,
+    f"present={bool(sm)}")
+# 主 App 关键键仍保留
+chk("UILaunchScreen 仍保留", isinstance(pl.get("UILaunchScreen"), dict))
+chk("UIBackgroundModes 含 audio", "audio" in (pl.get("UIBackgroundModes") or []))
 
 # 2) entitlements
 ent = os.path.join(ROOT, "scripts", "trollstore.entitlements.plist")
@@ -68,8 +58,10 @@ chk("CarPlaySceneDelegate.m 实现 didConnect", "didConnectInterfaceController" 
 chk("CarPlaySceneDelegate.m 用 setRootTemplate", "setRootTemplate" in m)
 chk("AppDelegate 实现 configurationForConnecting", "configurationForConnectingSceneSession" in a)
 chk("AppDelegate 判断 CarPlay role", "CPTemplateApplicationSceneSessionRoleApplication" in a)
+chk("AppDelegate 主场景返回 nil (legacy)", "return nil;" in a)
 chk("AppDelegate import CarPlaySceneDelegate.h", '#import "CarPlaySceneDelegate.h"' in a)
 chk("AppDelegate 保留 moduleName=MusicFree", 'self.moduleName = @"MusicFree"' in a)
+chk("AppDelegate 无 willConnectToSession (方案 B 不需要)", "willConnectToSession" not in a)
 
 # 4) pbxproj
 pbx = io.open(os.path.join(ROOT, "ios", "MusicFree.xcodeproj", "project.pbxproj"), encoding="utf-8").read()
