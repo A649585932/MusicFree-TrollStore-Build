@@ -63,24 +63,54 @@
 	</array>
 
 	<!--
-	  CarPlay 场景不在 Info.plist 声明 UIApplicationSceneManifest。
+	  CarPlay + 主 App 场景（方案 F）。
 
-	  原因（实测）：本工程是 RN 0.76 + Expo 52 的纯 legacy AppDelegate，
-	  源码里没有任何 UIWindowSceneDelegate 实现，RN 只在
-	  didFinishLaunching 里用 legacy 方式建 window。
-	  一旦声明 SceneManifest，系统改走 UIScene 生命周期去建主 App 场景，
-	  RN 的 window 就挂不上 -> 手机主 App 黑屏（v11141849 / v11141931 已验证）。
+	  真机日志结论（v11142006）：iOS 16 上系统总是创建 UIWindowScene，
+	  日志 `currentApplicationKeyWindow: 0x0` 说明 App 没有 key window。
+	  逐版复盘：
+	    v17        : 无 SceneManifest + AppDelegate 不插手 -> 系统把
+	                 UIApplicationDelegate.window 自动认作 key window -> 正常
+	    v11141849  : 声明主场景但没 delegateClass -> 没人负责 window -> 黑
+	    v11141931  : 写了 scene:willConnect 但因没 delegateClass 没被调用 -> 黑
+	    v11142006  : 实现 configurationForConnecting 对主场景 return nil
+	                 (UIKit 语义 = 阻止创建该场景) -> 主场景没了 -> 黑
 
-	  改为完全不声明 SceneManifest：
-	    - 主 App：走 legacy 路径，和 v17 一样正常显示
-	    - CarPlay：连接车机时系统请求 CPTemplateApplicationSceneSessionRoleApplication
-	      场景，plist 里没有该配置，UIKit 会回调 AppDelegate 的
-	      application:configurationForConnectingSceneSession:options:，
-	      由代码返回 CarPlay 配置（Apple 文档明确此 delegate 用于
-	      "configuration that isn't in your app's Info.plist"）。
-	      entitlement com.apple.developer.carplay-audio 保留，
-	      之前 v11141849 已证明车机能出图标。
+	  方案 F：两个 role 都【显式】指定 UISceneDelegateClassName，
+	  让每个场景都有明确的 delegate，不留任何"系统猜"的空档：
+	    - UIWindowSceneSessionRoleApplication -> AppDelegate
+	      它实现 scene:willConnectToSession: 把 RCTAppDelegate 建好的
+	      window 挂到 UIWindowScene（RCTAppDelegate 已声明 <UISceneDelegate>）
+	    - CPTemplateApplicationSceneSessionRoleApplication -> MFCarPlaySceneDelegate
+	      v11141849 已验证这样车机能出图标；保留不动
+	  不指定 UISceneStoryboardFile，避免老 nib 在 16.1.1 上解码崩溃。
+	  UIApplicationSupportsMultipleScenes=NO 防 RN 起第二份。
 	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>AppDelegate</string>
+				</dict>
+			</array>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>MFCarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 
 	<!-- 允许"文件"App 向 Documents 导入本地音乐与 .js 插件，并支持"打开方式" -->
 	<key>UIFileSharingEnabled</key>
