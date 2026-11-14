@@ -1,17 +1,17 @@
 /**
- * App 侧自研取播放链接（不依赖插件的 getMediaSource）
+ * 已验证的接口（全部本地实测可下载真实音频）：
  *
- * 背景：
- *   实测 padao 的网易云 / QQ 插件 getMediaSource 全部返回
- *   「聚合取链失败：所有可用源均未取得播放链接」，
- *   但平台自己的公开接口**完全可用**（实测拿到 audio/mpeg、7.5MB 音频）。
+ *  QQ 音乐 —— 桌面版 MusicFreeDesktop 同款「s01s 第三方通道」：
+ *    GET https://tang.api.s01s.cn/music_open_api.php?mid=<songmid>
+ *    → song_play_url_sq / song_play_url / song_play_url_standard ...
+ *    直接给出已签发 vkey 的完整播放链接，vip=付费 的歌也有，
+ *    实测《反方向的钟》《天后》《Whatever It Takes》均 HTTP 200 音频。
+ *    官方 CgiGetVkey 恒 104003（需登录），已弃用。
  *
- * 所以这里自己做取链，插件只作为兜底。
- *
- * 已验证的接口：
- *   网易云  /api/song/enhance/player/url?ids=[id]&br=320000
- *           → { data: [{ url, code, fee, size, br }] }
- *           code=200 且 url 非空 表示可播；code=-110 表示 VIP 受限
+ *  网易云：
+ *    GET /api/song/enhance/player/url?ids=[id]&br=320000
+ *    → { data: [{ url, code, fee, size, br }] }
+ *    code=200 且 url 非空 表示可播。
  */
 
 export interface IPlayUrlResult {
@@ -77,71 +77,86 @@ export async function getNeteasePlayUrl(
 }
 
 /**
- * 从 QQ 音乐取播放链接。
+ * 从 QQ 音乐取播放链接 —— 对齐桌面版 MusicFreeDesktop 的真实做法。
  *
- * QQ 的取链需要先拿 vkey，再拼成 http://dl.stream.qqmusic.qq.com/...
- * 这里用公开的 musicu.fcg 接口。
+ * 背景（全部本地实测）：
+ *   - 官方 musicu.fcg / CgiGetVkey 恒返回 result=104003（强制登录），
+ *     付费歌拿不到 purl；
+ *   - 桌面版能免登录播会员歌，抓包定位到它走第三方通道
+ *     tang.api.s01s.cn（插件里叫 qqS01sMid / s01s mid 直查）；
+ *   - 实测：GET https://tang.api.s01s.cn/music_open_api.php?mid=<songmid>
+ *     直接返回所有音质的**已签发 vkey 的完整播放链接** + 歌词，
+ *     且 vip=付费 的歌也有链接；
+ *   - 验证《反方向的钟》：
+ *       song_play_url_sq        → HTTP 200, audio/x-ogg,  27MB (FLAC)
+ *       song_play_url           → HTTP 200, audio/mp4,   6.0MB (193kbps)
+ *       song_play_url_standard  → HTTP 200, audio/mp4,   3.0MB
+ *     《天后》《Whatever It Takes》同样 vip=付费 且都有 url。
+ *
+ * 这个接口就是桌面版「次合代第三方通道」的实现，纯 HTTP GET，
+ * RN 的 fetch 可直接调用，不需要 request-forwarder、不需要登录。
  */
 export async function getQQPlayUrl(
     songMid: string,
     quality = "standard",
 ): Promise<IPlayUrlResult | null> {
-    // QQ 音质标识
-    const prefixMap: Record<string, string> = {
-        low: "M500",
-        standard: "M800",
-        high: "M800",
-        super: "RS01",
-    };
-    const prefix = prefixMap[quality] ?? "M800";
+    if (!songMid) {
+        return null;
+    }
 
-    const payload = {
-        req_0: {
-            module: "vkey.GetVkeyServer",
-            method: "CgiGetVkey",
-            param: {
-                guid: "10000",
-                songmid: [songMid],
-                songtype: [0],
-                uin: "0",
-                loginflag: 1,
-                platform: "20",
-            },
-        },
-        comm: { uin: "0", format: "json", ct: 24, cv: 0 },
+    // 音质 → s01s 响应里对应的字段（按优先级从高到低）
+    const qualityFields: Record<string, string[]> = {
+        super: ["song_play_url_sq", "song_play_url_pq", "song_play_url"],
+        high: ["song_play_url_sq", "song_play_url", "song_play_url_hq"],
+        standard: ["song_play_url", "song_play_url_hq", "song_play_url_standard"],
+        low: ["song_play_url_standard", "song_play_url_fq", "song_play_url"],
+        "320k": ["song_play_url", "song_play_url_hq"],
+        "128k": ["song_play_url_standard", "song_play_url_fq"],
+        flac: ["song_play_url_sq", "song_play_url_pq"],
     };
+    const fields =
+        qualityFields[quality] ??
+        ["song_play_url", "song_play_url_hq", "song_play_url_standard"];
 
     try {
-        const resp = await fetch(
-            "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json",
-            {
-                method: "POST",
-                headers: {
-                    "User-Agent":
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    Referer: "https://y.qq.com/",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
+        const url = `https://tang.api.s01s.cn/music_open_api.php?mid=${encodeURIComponent(
+            songMid,
+        )}`;
+        const resp = await fetch(url, {
+            headers: {
+                "User-Agent": UA_IOS,
+                Referer: "https://y.qq.com/",
+                Accept: "application/json",
             },
-        );
+        });
         if (!resp.ok) {
             return null;
         }
         const json: any = await resp.json();
-        const data = json?.req_0?.data;
-        const midurlinfo = data?.midurlinfo?.[0];
-        const purl = midurlinfo?.purl;
-        if (!purl) {
-            return null;
+
+        // 依次挑一个非空链接
+        for (const key of fields) {
+            const u = json?.[key];
+            if (typeof u === "string" && /^https?:\/\//.test(u)) {
+                return {
+                    url: u,
+                    quality,
+                    via: "qq-api",
+                };
+            }
         }
-        const sip = data?.sip?.[0] ?? "http://dl.stream.qqmusic.qq.com/";
-        const fullUrl = sip.endsWith("/") ? sip + purl : sip + "/" + purl;
-        return {
-            url: fullUrl,
-            quality,
-            via: "qq-api",
-        };
+
+        // 兜底：扫描所有 song_play_url* 字段（接口新增音质时不会漏）
+        for (const [k, v] of Object.entries(json ?? {})) {
+            if (
+                k.startsWith("song_play_url") &&
+                typeof v === "string" &&
+                /^https?:\/\//.test(v)
+            ) {
+                return { url: v, quality, via: "qq-api" };
+            }
+        }
+        return null;
     } catch {
         return null;
     }
