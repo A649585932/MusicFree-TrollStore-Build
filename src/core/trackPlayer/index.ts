@@ -39,7 +39,7 @@ import minDistance from "@/utils/minDistance";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { ImgAsset } from "@/constants/assetsConst";
 import { resolveImportedAssetOrPath } from "@/utils/fileUtils";
-import { getPlayUrlDirect } from "../playUrlProvider";
+import { getPlayUrlDirect, isFullAudio } from "../playUrlProvider";
 
 
 
@@ -488,7 +488,8 @@ class TrackPlayer extends EventEmitter<{
              *
              * 背景：实测 padao 的网易云 / QQ 插件 getMediaSource 全部返回
              *   「聚合取链失败：所有可用源均未取得播放链接」，
-             * 但平台自己的公开接口是通的（网易云实测拿到 audio/mpeg）。
+             * 但平台自己的第三方通道（QQ s01s / 网易云 星海+oiapi）是通的，
+             * 且每个候选都经过 isFullAudio 过滤（挡掉 30 秒试听片段）。
              *
              * 所以这里优先走 App 自研的取链，失败再退回插件。
              */
@@ -521,13 +522,24 @@ class TrackPlayer extends EventEmitter<{
             if (!source) {
                 for (let quality of qualityOrder) {
                     if (this.isCurrentMusic(musicItem)) {
-                        source =
+                        const candidate =
                             (await plugin?.methods?.getMediaSource(
                                 musicItem,
                                 quality,
                             )) ?? null;
-                        // 5.3.1 获取到真实源
-                        if (source) {
+                        // 5.3.1 获取到真实源；但要挡掉 30 秒试听片段
+                        //      （网易云 eapi 匿名通道会明确返回 trial clip 30s，
+                        //       某些第三方通道也可能给 <1MB 的片段）
+                        if (candidate?.url) {
+                            const full = await isFullAudio(candidate.url);
+                            if (!full) {
+                                trace(
+                                    `插件返回试听片段，跳过 quality=${quality}`,
+                                );
+                                // 继续尝试下一音质，而不是拿片段去播
+                                continue;
+                            }
+                            source = candidate;
                             this.setQuality(quality);
                             break;
                         }
