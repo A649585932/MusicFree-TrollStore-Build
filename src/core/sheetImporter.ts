@@ -340,15 +340,20 @@ export async function importSheetDirect(
     preferred?: SheetSource,
 ): Promise<IImportResult> {
     let target = (input ?? "").trim();
+    const originalInput = target;
+
+    console.log("[sheetImport] 输入:", target);
+    console.log("[sheetImport] isShortLink:", looksLikeShortLink(target));
+
     let source =
         detectSource(target) === "unknown"
             ? preferred ?? "netease"
             : detectSource(target);
 
-    // 短链：先跟跳转拿到真实地址（这一步很关键，
-    // QQ 分享出来的 c6.y.qq.com/...u?__=xxx 里没有任何 id）
+    // ---- 第一步：短链跟随跳转，拿到真实地址 ----
     if (looksLikeShortLink(target)) {
         const real = await followShortLink(target);
+        console.log("[sheetImport] 跳转后:", real);
         if (real && real !== target) {
             target = real;
             const s2 = detectSource(real);
@@ -356,21 +361,37 @@ export async function importSheetDirect(
                 source = s2;
             }
         }
+        // 即使 URL 没变，也从原链接里再抽一次 id（有些短链服务直接在
+        // query 里带 id，比如 ?id=9774303959）
+        if (extractQQId(target) === null && extractNeteaseId(target) === null) {
+            const fromOriginal = extractQQId(originalInput);
+            if (fromOriginal) {
+                target = fromOriginal;
+                console.log("[sheetImport] 从原链接提取 id:", fromOriginal);
+            }
+        }
     }
 
+    console.log("[sheetImport] 解析目标:", target, "平台:", source);
+
+    // ---- 第二步：按平台提取 id 并拉取 ----
     if (source === "netease") {
         const id = extractNeteaseId(target);
+        console.log("[sheetImport] 网易云 id:", id);
         if (!id) {
-            throw new Error("没能从链接里识别出网易云歌单 ID");
+            throw new Error(
+                "没能从链接里识别出网易云歌单 ID。请试粘贴含 playlist?id= 的完整链接",
+            );
         }
         return fetchNeteaseSheet(id);
     }
 
     if (source === "qq") {
         const id = extractQQId(target);
+        console.log("[sheetImport] QQ id:", id);
         if (!id) {
             throw new Error(
-                "没能从链接里识别出 QQ 歌单 ID（短链可能已失效，试试直接粘贴长链或歌单 ID）",
+                "没能识别出 QQ 歌单 ID。短链可能被平台限制，请打开分享页复制完整链接，或直接输入歌单数字 ID",
             );
         }
         return fetchQQSheet(id);
