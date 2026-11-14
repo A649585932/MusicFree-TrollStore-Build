@@ -39,6 +39,7 @@ import minDistance from "@/utils/minDistance";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { ImgAsset } from "@/constants/assetsConst";
 import { resolveImportedAssetOrPath } from "@/utils/fileUtils";
+import { getPlayUrlDirect } from "../playUrlProvider";
 
 
 
@@ -481,21 +482,53 @@ class TrackPlayer extends EventEmitter<{
             );
             // 5.3 插件返回音源
             let source: IPlugin.IMediaSourceResult | null = null;
-            for (let quality of qualityOrder) {
-                if (this.isCurrentMusic(musicItem)) {
-                    source =
-                        (await plugin?.methods?.getMediaSource(
-                            musicItem,
-                            quality,
-                        )) ?? null;
-                    // 5.3.1 获取到真实源
-                    if (source) {
-                        this.setQuality(quality);
-                        break;
+
+            /**
+             * 5.2.5 先用自研接口取播放链接
+             *
+             * 背景：实测 padao 的网易云 / QQ 插件 getMediaSource 全部返回
+             *   「聚合取链失败：所有可用源均未取得播放链接」，
+             * 但平台自己的公开接口是通的（网易云实测拿到 audio/mpeg）。
+             *
+             * 所以这里优先走 App 自研的取链，失败再退回插件。
+             */
+            try {
+                const direct = await getPlayUrlDirect(
+                    { id: musicItem.id, platform: musicItem.platform },
+                    qualityOrder[0] ?? "standard",
+                );
+                if (direct?.url) {
+                    source = {
+                        url: direct.url,
+                        quality: (direct.quality ?? "standard") as any,
+                    } as IPlugin.IMediaSourceResult;
+                    this.setQuality((direct.quality ?? "standard") as any);
+                    trace(
+                        `自研取链成功 [${direct.via}] ${String(direct.url).slice(0, 60)}`,
+                    );
+                }
+            } catch (e) {
+                trace(`自研取链异常: ${(e as any)?.message ?? e}`);
+            }
+
+            // 5.3 插件兜底（自研失败时才走）
+            if (!source) {
+                for (let quality of qualityOrder) {
+                    if (this.isCurrentMusic(musicItem)) {
+                        source =
+                            (await plugin?.methods?.getMediaSource(
+                                musicItem,
+                                quality,
+                            )) ?? null;
+                        // 5.3.1 获取到真实源
+                        if (source) {
+                            this.setQuality(quality);
+                            break;
+                        }
+                    } else {
+                        // 5.3.2 已经切换到其他歌曲了，
+                        return;
                     }
-                } else {
-                    // 5.3.2 已经切换到其他歌曲了，
-                    return;
                 }
             }
 
