@@ -1,16 +1,13 @@
 /*
- * CarPlaySceneDelegate.h
- * Phase 0 minimal probe: prove CarPlay entitlement + scene work on TrollStore.
- *
- * Only builds a static CPListTemplate + CPNowPlayingTemplate.
- * No RN bridge yet (Phase 1). If the CarPlay screen shows this app,
- * the entitlement path is valid and we wire up real playback.
+ * CarPlaySceneDelegate.h — Phase 1
+ * 车机界面：歌单列表 -> 曲目列表 -> 点播；另有"正在播放"tab。
  */
 #import <Foundation/Foundation.h>
 #import <CarPlay/CarPlay.h>
 
 API_AVAILABLE(ios(14.0))
-@interface MFCarPlaySceneDelegate : UIResponder <CPTemplateApplicationSceneDelegate>
+@interface MFCarPlaySceneDelegate : UIResponder <CPTemplateApplicationSceneDelegate,
+                                                CPListTemplateDelegate>
 
 @property (nonatomic, strong) CPInterfaceController *interfaceController;
 
