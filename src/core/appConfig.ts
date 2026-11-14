@@ -170,6 +170,24 @@ class AppConfig implements IAppConfig {
 
     async setup(): Promise<void> {
         await this.migrateConfig();
+
+        /*
+         * 默认值种子：让「使用移动网络播放」首次安装即打开。
+         *
+         * 只在键【从未被写入过】时设置，用 configStore.contains 判定，
+         * 这样用户后来手动关闭后不会被强行改回（尊重用户选择）。
+         *
+         * 注意：不能只改设置页里 `?? false` -> `?? true`，因为
+         * trackPlayer 的拦截逻辑读的是 getConfig()：
+         *   Network.isCellular && !getConfig("basic.useCelluarNetworkPlay")
+         * 键不存在时 getConfig 返回 undefined，!undefined === true
+         * 依然会拦截。必须真正把 true 写进 MMKV 才生效。
+         */
+        const useCelluarNetworkPlayKey =
+            "basic.useCelluarNetworkPlay" as const;
+        if (!configStore.contains(useCelluarNetworkPlayKey)) {
+            this.setConfig(useCelluarNetworkPlayKey, true);
+        }
     }
 
     setConfig<K extends keyof IAppConfigProperties>(
