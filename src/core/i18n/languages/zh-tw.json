@@ -232,7 +232,7 @@
     "basicSettings.associateLyricType.input": "輸入歌曲ID",
     "basicSettings.associateLyricType.search": "搜尋歌詞",
     "basicSettings.showExitOnNotification": "通知欄顯示關閉按鈕 (重啟後生效)",
-    "basicSettings.sheetAndAlbum": "歌單&專輯",
+    "basicSettings.sheetAndAlbum": "歌單",
     "basicSettings.clickMusicInSearch": "點擊搜尋結果內單曲時",
     "basicSettings.clickMusicInSearch.playMusic": "播放歌曲",
     "basicSettings.clickMusicInSearch.playMusicAndReplace": "播放歌曲並替換播放列表",
