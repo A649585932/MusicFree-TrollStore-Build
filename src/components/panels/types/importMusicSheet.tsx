@@ -236,23 +236,33 @@ export default function ImportMusicSheet() {
                 title: t("panel.importMusicSheet.prepareImport"),
                 content: `《${result.sheetName}》共 ${result.songs.length} 首，导入到新歌单？`,
                 onOk() {
-                    /**
-                     * 关键：platform 必须是「插件名」，不是平台标识。
+                    /*
+                     * platform 用平台标识 "qq" / "netease"。
                      *
-                     * PluginManager.getByName() 用 `_.name === name` 精确匹配，
-                     * 插件的 name 是中文名（如「QQ音乐」），
-                     * 所以这里要把 platform 设成插件名，
-                     * 否则播放时找不到插件 → 拿不到 url → 无限跳下一首。
+                     * 依据（两条铁证）：
+                     *  1) 手机版 plugin.ts L1015: this.name = _instance.platform
+                     *     → Plugin 对象的 name 就是插件的 platform 字段，
+                     *       不是中文显示名。「QQ音乐」只是 instance.name。
+                     *  2) 桌面版 Local Storage 里真实 musicItem：
+                     *     {"platform":"qq","_srcOrder":["qq"],...}
+                     *
+                     * 所以 getByName("qq") 能精确命中插件。
+                     * 之前改成中文名反而会让 getByName 返回 undefined。
                      */
-                    const pluginName = resolvePluginName(result!.source, preferredPlugin);
+                    const platformId = result!.source;
                     const items = result!.songs.map(s => ({
                         id: s.id,
-                        platform: pluginName,
+                        platform: platformId,
                         title: s.title,
                         artist: s.artist,
                         album: s.album,
                         duration: s.duration,
                         artwork: s.artwork,
+                        // 对齐桌面版 musicItem：插件取链依赖这些字段
+                        _srcOrder: [platformId],
+                        primaryKey: s.id,
+                        songmid: s.id,
+                        qualities: s.qualities,
                     }));
                     showPanel("AddToMusicSheet", { musicItem: items });
                 },
