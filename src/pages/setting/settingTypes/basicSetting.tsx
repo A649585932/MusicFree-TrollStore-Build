@@ -138,6 +138,12 @@ export default function BasicSetting() {
 
     const sectionListRef = useRef<SectionList | null>(null);
 
+    /**
+     * 每个 section 的 Y 偏移（由 renderSectionHeader 的 onLayout 填充）。
+     * 点击顶部 tab 时用它精确跳转——比 scrollToLocation 可靠得多。
+     */
+    const sectionOffsets = useRef<Record<number, number>>({});
+
     /** 当前高亮的分类索引（随滚动同步） */
     const [activeSection, setActiveSection] = useState(0);
 
@@ -555,9 +561,9 @@ export default function BasicSetting() {
         <View style={styles.wrapper}>
             {/*
               顶部分类导航（固定，不可拖动）
-              - scrollEnabled={false}：禁止横向拖动，位置固定死
-              - 点击直接跳转到对应 section
-              - 高亮当前所在分类
+              - 点击跳转：用记录下来的 section Y 坐标 + scrollToOffset
+                （scrollToLocation 在没有 getItemLayout 时经常静默失败，
+                 实测点击无反应，所以改成坐标法）
             */}
             <View style={styles.headerContainer}>
                 {basicOptions.map((section, index) => {
@@ -566,12 +572,46 @@ export default function BasicSetting() {
                         <TouchableOpacity
                             key={section.title}
                             onPress={() => {
-                                sectionListRef.current?.scrollToLocation({
-                                    sectionIndex: index,
-                                    itemIndex: 0,
-                                    viewOffset: 0,
-                                    animated: true,
-                                });
+                                const y = sectionOffsets.current[index];
+                                if (typeof y === "number") {
+                                    /**
+                                     * SectionList 没有 scrollToOffset，
+                                     * 但可以通过 getScrollResponder() 拿到
+                                     * 底层的 ScrollView 响应器，
+                                     * 再调用 scrollTo({ y }) 精确跳转。
+                                     */
+                                    const responder =
+                                        sectionListRef.current?.getScrollResponder?.();
+                                    if (responder?.scrollTo) {
+                                        responder.scrollTo({
+                                            y: Math.max(0, y - rpx(8)),
+                                            animated: true,
+                                        });
+                                    } else {
+                                        // 兜底
+                                        try {
+                                            sectionListRef.current?.scrollToLocation({
+                                                sectionIndex: index,
+                                                itemIndex: 0,
+                                                animated: true,
+                                                viewOffset: 0,
+                                            });
+                                        } catch {
+                                            /* 忽略 */
+                                        }
+                                    }
+                                } else {
+                                    try {
+                                        sectionListRef.current?.scrollToLocation({
+                                            sectionIndex: index,
+                                            itemIndex: 0,
+                                            animated: true,
+                                            viewOffset: 0,
+                                        });
+                                    } catch {
+                                        /* 忽略 */
+                                    }
+                                }
                                 setActiveSection(index);
                             }}
                             activeOpacity={0.7}
@@ -581,7 +621,6 @@ export default function BasicSetting() {
                                 fontColor={active ? "text" : "textSecondary"}>
                                 {section.title}
                             </ThemeText>
-                            {/* 当前分类下方加一条高亮指示线 */}
                             {active ? <View style={styles.headerActiveBar} /> : null}
                         </TouchableOpacity>
                     );
@@ -589,17 +628,34 @@ export default function BasicSetting() {
             </View>
             <SectionList
                 sections={basicOptions}
-                renderSectionHeader={({ section }) => (
-                    <View style={styles.sectionHeader}>
-                        <ThemeText
-                            fontSize="subTitle"
-                            fontColor="textSecondary"
-                            fontWeight="bold">
-                            {section.title}
-                        </ThemeText>
-                    </View>
-                )}
                 ref={sectionListRef}
+                /**
+                 * 记录每个 section 在列表里的 Y 偏移。
+                 * SectionList 的 renderSectionHeader 拿不到绝对位置，
+                 * 所以用 onLayout 累计：每次 header 布局时记下它的 y。
+                 */
+                renderSectionHeader={({ section }) => {
+                    const idx = basicOptions.findIndex(
+                        s => s.title === section.title,
+                    );
+                    return (
+                        <View
+                            style={styles.sectionHeader}
+                            onLayout={e => {
+                                if (idx >= 0) {
+                                    sectionOffsets.current[idx] =
+                                        e.nativeEvent.layout.y;
+                                }
+                            }}>
+                            <ThemeText
+                                fontSize="subTitle"
+                                fontColor="textSecondary"
+                                fontWeight="bold">
+                                {section.title}
+                            </ThemeText>
+                        </View>
+                    );
+                }}
                 // 键盘弹出时不要挡住输入区域，点击空白也能收键盘
                 keyboardShouldPersistTaps="handled"
                 // iOS 上自动给底部留出键盘高度
