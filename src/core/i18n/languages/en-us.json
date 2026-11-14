@@ -232,7 +232,7 @@
     "basicSettings.associateLyricType.input": "Input Song ID",
     "basicSettings.associateLyricType.search": "Search Lyrics",
     "basicSettings.showExitOnNotification": "Show close button in notification bar (Restart required)",
-    "basicSettings.sheetAndAlbum": "Playlist & Album",
+    "basicSettings.sheetAndAlbum": "Playlist",
     "basicSettings.clickMusicInSearch": "When clicking song in search results",
     "basicSettings.clickMusicInSearch.playMusic": "Play Song",
     "basicSettings.clickMusicInSearch.playMusicAndReplace": "Play Song and Replace Playlist",
