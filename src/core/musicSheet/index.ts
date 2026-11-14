@@ -144,6 +144,47 @@ class MusicSheetClazz implements IInjectable {
     }
 
     /**
+     * CarPlay 用：读取全部歌单（非 React 环境也能调用）。
+     * 返回 {id, title, count} 的精简结构，避免把内部对象透传给原生。
+     */
+    getAllSheetsForCarPlay(): Array<{ id: string; title: string; count: number }> {
+        const sheets = getDefaultStore().get(musicSheetsBaseAtom) ?? [];
+        return sheets.map(it => ({
+            id: String(it.id ?? ""),
+            title: String(it.title ?? "未命名歌单"),
+            count: (it as any)?.musicList?.length ??
+                musicListMap.get(String(it.id))?.musicList?.length ?? 0,
+        }));
+    }
+
+    /**
+     * CarPlay 用：读取某歌单曲目精简结构。
+     */
+    getTracksForCarPlay(
+        sheetId: string,
+    ): Array<{ id: string; title: string; artist: string }> {
+        const list = this.getSortedMusicListBySheetId(sheetId)?.musicList ?? [];
+        return list.map((it: any) => ({
+            id: String(it.id ?? it.primaryKey ?? ""),
+            title: String(it.title ?? "未知歌曲"),
+            artist: String(it.artist ?? ""),
+        }));
+    }
+
+    /**
+     * CarPlay 用：按 id 找某首歌的完整 musicItem（用于播放）。
+     */
+    findMusicItemForCarPlay(sheetId: string, trackId: string): any | null {
+        const list = this.getSortedMusicListBySheetId(sheetId)?.musicList ?? [];
+        return (
+            list.find(
+                (it: any) =>
+                    String(it.id ?? it.primaryKey ?? "") === String(trackId),
+            ) ?? null
+        );
+    }
+
+    /**
      * 更新基本信息
      * @param sheetId 歌单ID
      * @param data 歌单数据
