@@ -7,6 +7,7 @@ import {
     DeviceEventEmitter,
     KeyboardAvoidingView,
     NativeEventSubscription,
+    Platform,
     Pressable,
     StyleSheet,
 } from "react-native";
@@ -193,7 +194,22 @@ export default function (props: IPanelBaseProps) {
             ) : (
                 <KeyboardAvoidingView
                     style={style.kbContainer}
-                    behavior={keyboardAvoidBehavior || "position"}>
+                    /*
+                     * 关键修复：底部面板被输入法遮住
+                     *
+                     * 原来固定用 "position"，在 iOS 上对「绝对定位 + transform
+                     * 动画」的面板不生效——KeyboardAvoidingView 计算的是自己的
+                     * layout，而面板是用 translateY 移上来的，两者不一致。
+                     *
+                     * 改成：
+                     *   iOS     → "padding"：直接把面板往上顶，最稳
+                     *   Android → "height" ：Android 有 adjustResize，height 够用
+                     */
+                    behavior={
+                        keyboardAvoidBehavior ||
+                        (Platform.OS === "ios" ? "padding" : "height")
+                    }
+                    keyboardVerticalOffset={0}>
                     {panelBody}
                 </KeyboardAvoidingView>
             )}
