@@ -289,7 +289,7 @@ export interface ILanguageData {
     "basicSettings.associateLyricType.input": string; // 输入
     "basicSettings.associateLyricType.search": string; // 搜索
     "basicSettings.showExitOnNotification": string; // 通知中显示退出
-    "basicSettings.sheetAndAlbum": string; // 歌单和专辑
+    "basicSettings.sheetAndAlbum": string; // 歌单
     "basicSettings.clickMusicInSearch": string; // 点击搜索中的音乐
     "basicSettings.clickMusicInSearch.playMusic": string; // 播放歌曲
     "basicSettings.clickMusicInSearch.playMusicAndReplace": string; // 播放歌曲并替换播放列表
